@@ -218,12 +218,16 @@ export interface DeckLinkDevice {
   persistent_id: string;
   model_name: string;
   display_name: string;
+  device_label?: string;
   supports_duplex: boolean;
   duplex_mode?: string;
   sdi_inputs: number;
   sdi_outputs: number;
   supports_internal_keying: boolean;
   supports_external_keying: boolean;
+  supports_capture: boolean;
+  supports_playback: boolean;
+  max_audio_channels: number;
 }
 
 // ============================================================================
