@@ -1,103 +1,110 @@
-# CasparCG 2.5.0 – Windows Batch Launcher (Config Menu)
+# CasparCG 2.5.0 – Dynamic Windows Batch Launcher
 
-A Windows `.bat` menu that switches between multiple CasparCG configurations by copying a selected `casparcg-*.config` to `casparcg.config` (overwrite without prompting), then starts:
-
-- `scanner.exe` **(if present)** after **3 seconds** (minimised, and only if it is not already running)
-- `casparcg.exe` after **5 seconds** (minimised), with a loop that restarts CasparCG if the exit code is `5`
+A Windows `.bat` menu that **automatically discovers** all `*.config` files in the current directory (excluding `casparcg.config`) and presents them as selectable options.
 
 ## Features
 
-- Console menu with 6 presets:
-  - 2 Channels: 1080p50 / 1080i50 / 1080p25
-  - 3 Channels: 1080p50 / 1080i50 / 1080p25
-- Copies preset config → `casparcg.config` using `copy /Y`
-- Starts `scanner.exe` minimised if the file exists and the process is not already running
-- Starts `casparcg.exe` minimised and waits for it to exit (via PowerShell) to reliably capture the exit code
-- Loop: if CasparCG exits with code `5`, it is restarted
+- **Dynamic discovery**: No hardcoded presets — finds all `*.config` files automatically
+- **Smart parsing**: Extracts resolution and channel count from filenames
+- **Modification timestamp**: Shows when each config was last modified
+- **Up to 9 configs**: Limited by Windows `choice` command
+- **Auto-start timeout**: Defaults to [S] after 15 seconds
+- **Scanner support**: Starts `scanner.exe` if present (and not already running)
+- **Supervisor mode**: Restarts CasparCG on exit code 5
 
-## Folder layout
+## Menu Display Format
 
-Place everything in the same directory:
+```
+[1] CasparCG Config | 1080p50 | 2 Channels | 2026-01-20 14:32
+[2] CasparCG Config | 1080i50 | 3 Channels | 2026-01-19 09:15
+[3] CasparCG Config | 720p50 | 2026-01-18 16:45
 
-your-folder
-casparcg.exe
-scanner.exe (optional)
-casparcg.config (created/overwritten)
-casparcg-1080p50-2ch.config
-casparcg-1080i50-2ch.config
-casparcg-1080p25-2ch.config
-casparcg-1080p50-3ch.config
-casparcg-1080i50-3ch.config
-casparcg-1080p25-3ch.config
-caspar-batch-starter.bat
+[S] Start (no copy; keep current casparcg.config)
+[Q] Quit
+```
 
+## Filename Convention
 
-> The batch uses `%~dp0` and runs from its own directory, so it is relatively portable.
+For best results, name your config files following this pattern:
+
+```
+casparcg-{resolution}-{channels}ch.config
+```
+
+Examples:
+- `casparcg-1080p50-2ch.config` → "CasparCG Config | 1080p50 | 2 Channels | 2026-01-20 14:32"
+- `casparcg-1080i50-3ch.config` → "CasparCG Config | 1080i50 | 3 Channels | 2026-01-19 09:15"
+- `casparcg-720p25-2ch.config` → "CasparCG Config | 720p25 | 2 Channels | 2026-01-18 16:45"
+
+### Fallback for Custom Filenames
+
+If the filename doesn't match the expected pattern, it displays the filename with `-` and `_` replaced by ` | `:
+
+- `my-custom-config.config` → "my | custom | config | 2026-01-20 10:00"
+- `studio_a_backup.config` → "studio | a | backup | 2026-01-19 08:30"
+- `test.config` → "test | 2026-01-18 12:00"
+
+### Supported Resolutions (auto-detected)
+
+- 2160p: 2160p60, 2160p50, 2160p30, 2160p25, 2160p24
+- 1080p: 1080p60, 1080p50, 1080p30, 1080p25, 1080p24
+- 1080i: 1080i60, 1080i50
+- 720p: 720p60, 720p50, 720p30, 720p25
+- SD: PAL, NTSC
+
+### Supported Channel Counts
+
+1–8 channels (detected from `Xch` pattern in filename)
+
+## Folder Layout
+
+Place the batch file in your CasparCG server directory:
+
+```
+CasparCG-Server/
+├── casparcg.exe
+├── scanner.exe (optional)
+├── casparcg.config (active config, created/overwritten)
+├── casparcg-1080p50-2ch.config
+├── casparcg-1080i50-2ch.config
+├── casparcg-720p50-3ch.config
+├── ... (any other *.config files)
+└── caspar-batch-starter.bat
+```
 
 ## Usage
 
-1. Run `casparcg-menu.bat` (double-click or from Command Prompt).
-2. Choose `1–6` for the required format/channel setup.
-3. The batch copies the chosen config to `casparcg.config`.
-4. After 3 seconds, `scanner.exe` starts (if present).
-5. After a total of 5 seconds, `casparcg.exe` starts.
+1. Double-click `caspar-batch-starter.bat`
+2. The menu shows all discovered config files with parsed details
+3. Press `1`–`9` to select a config (copies it to `casparcg.config`)
+4. Press `S` to start without changing config
+5. Press `Q` to quit
+6. After 15 seconds of inactivity, defaults to `S`
 
-To quit the menu, press `Q`.
+## How It Works
 
-## Presets mapping
+1. **Discovery**: Scans for `*.config` files, excludes `casparcg.config`
+2. **Parsing**: Extracts resolution/channels from filename using pattern matching
+3. **Timestamp**: Reads file modification time via `%%~t` expansion
+4. **Selection**: Uses `choice /C` with dynamically built character set
+5. **Apply**: Copies selected config to `casparcg.config`
+6. **Start**: Launches scanner (if present) then CasparCG (minimised)
 
-| Menu | Label | Copied to `casparcg.config` |
-|---:|---|---|
-| 1 | 2 Channels / 1080p50 | `casparcg-1080p50-2ch.config` |
-| 2 | 2 Channels / 1080i50 | `casparcg-1080i50-2ch.config` |
-| 3 | 2 Channels / 1080p25 | `casparcg-1080p25-2ch.config` |
-| 4 | 3 Channels / 1080p50 | `casparcg-1080p50-3ch.config` |
-| 5 | 3 Channels / 1080i50 | `casparcg-1080i50-3ch.config` |
-| 6 | 3 Channels / 1080p25 | `casparcg-1080p25-3ch.config` |
+## Limitations
 
-## Notes on “minimised” and exit codes
-
-- `scanner.exe` is launched using `start "" /min ...`.
-- `casparcg.exe` is launched via PowerShell `Start-Process ... -Wait -PassThru` to:
-  - start minimised
-  - capture the process exit code reliably
-- Exit code `5` triggers a restart (`goto :START`). Any other exit code ends the loop.
+- Maximum 9 config files (Windows `choice` limitation)
+- Timestamp format depends on Windows regional settings
 
 ## Requirements
 
-- Windows `cmd.exe`
-- PowerShell available (standard on modern Windows)
-- Built-in tools: `timeout`, `tasklist`, `find`
+- Windows 10/11
+- PowerShell (for supervisor/restart functionality)
+- Standard Windows commands: `choice`, `timeout`, `tasklist`, `find`
 
-## Customisation
+## Encoding
 
-### Add or change presets
-Edit `CFG1..CFG6` and the menu text. If adding more, also update the `choice /C ...` set.
+Save the `.bat` file as **ANSI / Windows-1252** for the "Thåst" banner to display correctly.
 
-Example:
+## Licence
 
-```bat
-set "CFG7=casparcg-720p50-2ch.config"
-
-
-Then add 7 to choice /C 1234567Q and add a menu line.
-
-Change delays
-
-Delays are controlled by:
-
-timeout /t 3 /nobreak (scanner)
-
-timeout /t 2 /nobreak (additional 2 seconds → total 5 seconds before CasparCG)
-
-Troubleshooting
-
-“Missing file”: the selected casparcg-*.config does not exist in the directory.
-
-CasparCG does not start: confirm casparcg.exe is in the same folder as the batch.
-
-scanner does not start: confirm scanner.exe is named exactly and is not already running (the script checks via tasklist).
-
-Licence
-
-Internal use: unrestricted. If publishing in a repository, consider adding an MIT licence (or your preferred equivalent).
+MIT – Free to use and modify.
