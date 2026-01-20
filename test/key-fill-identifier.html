@@ -1,0 +1,1414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Key/Fill Channel Identifier</title>
+  <style>
+    /*
+     * KEY/FILL CHANNEL IDENTIFIER
+     *
+     * Three-layer design philosophy:
+     * 1. FILL monitor alone  → sees "FILL" text, colourful graphics, channel ID
+     * 2. KEY monitor alone   → sees "KEY" text as white matte, different animation
+     * 3. COMBINED (DSK)      → sees BOTH texts + "PAIRED" reveal + merged animations
+     *
+     * The magic: Fill RGB × Key luminance = Combined output
+     * - Where Key is white (1.0) → Fill colour shows through
+     * - Where Key is black (0.0) → Transparent (background shows)
+     *
+     * Design principle: Every pixel is considered for all three viewing modes.
+     */
+
+    :root {
+      /* Broadcast-safe colours (staying within 16-235 range feel) */
+      --fill-accent: #00d4ff;
+      --fill-accent-rgb: 0, 212, 255;
+      --fill-secondary: #ff6b35;
+      --fill-secondary-rgb: 255, 107, 53;
+      --key-white: #ffffff;
+      --panel-bg: rgba(0, 0, 0, 0.85);
+      --panel-border: rgba(255, 255, 255, 0.15);
+
+      /* Typography */
+      --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      --font-display: 'Inter', 'SF Pro Display', -apple-system, system-ui, sans-serif;
+
+      /* Sizing */
+      --safe-margin: 3.5%;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      /* CRITICAL: transparent background for CasparCG alpha channel */
+      background: transparent;
+    }
+
+    /* Preview mode: checkerboard shows transparency (like Photoshop) */
+    .stage.preview {
+      background:
+        linear-gradient(45deg, #1a1a1a 25%, transparent 25%),
+        linear-gradient(-45deg, #1a1a1a 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #1a1a1a 75%),
+        linear-gradient(-45deg, transparent 75%, #1a1a1a 75%),
+        #0d0d0d;
+      background-size: 40px 40px;
+      background-position: 0 0, 0 20px, 20px -20px, -20px 0px;
+    }
+
+    .stage {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      background: transparent;
+      font-family: var(--font-display);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       FILL MODE SPECIFIC STYLES
+       These elements appear in fill output, provide RGB colour data
+       ═══════════════════════════════════════════════════════════════ */
+
+    /* Subtle grid texture - fill and preview only (provides visual richness) */
+    .fill-texture {
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+    .stage.key .fill-texture { display: none; }
+    .stage.preview .fill-texture { opacity: 0.5; }
+
+    /* Gradient sweep - fill only */
+    .fill-sweep {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(
+        135deg,
+        rgba(0, 212, 255, 0.08) 0%,
+        transparent 40%,
+        transparent 60%,
+        rgba(255, 107, 53, 0.06) 100%
+      );
+      pointer-events: none;
+    }
+    .stage.key .fill-sweep { display: none; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       MAIN LAYOUT STRUCTURE
+       ═══════════════════════════════════════════════════════════════ */
+
+    .layout {
+      position: absolute;
+      inset: var(--safe-margin);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      grid-template-columns: 1fr 1fr;
+      gap: 2vmin;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       HEADER ZONE - "FILL" and "KEY" labels
+
+       FILL mode: Shows "FILL" text in left box, right box is subtle
+       KEY mode:  Shows "KEY" text as matte in right box, left is solid white
+       COMBINED:  Both texts visible! Left shows "FILL", right shows "KEY"
+       ═══════════════════════════════════════════════════════════════ */
+
+    .header {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2vmin;
+      height: clamp(60px, 10vmin, 100px);
+    }
+
+    .header-box {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 1.5vmin;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* LEFT BOX: Contains "FILL" label */
+    .header-left {
+      background: linear-gradient(135deg, rgba(0,0,0,0.7), rgba(0,0,0,0.9));
+      border: 1px solid var(--panel-border);
+    }
+    .stage.key .header-left {
+      /* Key mode: solid white = full alpha, so FILL text shows in combined */
+      background: var(--key-white);
+      border: none;
+    }
+
+    .fill-label {
+      font-family: var(--font-mono);
+      font-size: clamp(18px, 3.5vmin, 36px);
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      color: var(--fill-accent);
+      text-shadow: 0 0 20px rgba(var(--fill-accent-rgb), 0.5);
+    }
+    .stage.key .fill-label {
+      /* In key mode, this text is invisible (same as bg) but position preserved */
+      color: var(--key-white);
+      text-shadow: none;
+    }
+
+    /* RIGHT BOX: Contains "KEY" label */
+    .header-right {
+      /* Fill mode: subtle gradient background that will show through key cutout */
+      background: linear-gradient(135deg,
+        rgba(255, 107, 53, 0.3),
+        rgba(255, 107, 53, 0.15),
+        rgba(0, 212, 255, 0.2)
+      );
+      border: 1px solid var(--panel-border);
+    }
+    .stage.key .header-right {
+      /* Key mode: black background (transparent), text is white matte */
+      background: transparent;
+      border: none;
+    }
+
+    .key-label {
+      font-family: var(--font-mono);
+      font-size: clamp(18px, 3.5vmin, 36px);
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      /* Fill mode: very subtle, almost invisible */
+      color: rgba(255, 255, 255, 0.1);
+    }
+    .stage.key .key-label {
+      /* Key mode: bright white matte */
+      color: var(--key-white);
+    }
+    /* Preview: KEY text visible in gradient colours (simulates combined) */
+    .stage.preview .key-label {
+      color: transparent;
+      background: linear-gradient(135deg, var(--fill-secondary), var(--fill-accent));
+      -webkit-background-clip: text;
+      background-clip: text;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       MAIN CENTER ZONE - Channel ID + Animation panels
+       ═══════════════════════════════════════════════════════════════ */
+
+    .center {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 2vmin;
+    }
+
+    /* ID PANEL - Large channel number */
+    .id-panel {
+      background: linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0.85));
+      border: 1px solid var(--panel-border);
+      border-radius: 2vmin;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .stage.key .id-panel {
+      background: transparent;
+      border: none;
+    }
+
+    /* Decorative rings behind ID - fill only */
+    .id-rings {
+      position: absolute;
+      width: 80%;
+      height: 80%;
+      border: 2px solid rgba(var(--fill-accent-rgb), 0.15);
+      border-radius: 50%;
+      animation: pulse-ring 4s ease-in-out infinite;
+    }
+    .id-rings::before,
+    .id-rings::after {
+      content: '';
+      position: absolute;
+      inset: 10%;
+      border: 1px solid rgba(var(--fill-accent-rgb), 0.1);
+      border-radius: 50%;
+    }
+    .id-rings::after {
+      inset: 25%;
+      border-color: rgba(var(--fill-secondary-rgb), 0.08);
+    }
+    .stage.key .id-rings { display: none; }
+
+    @keyframes pulse-ring {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.05); opacity: 0.7; }
+    }
+
+    .channel-id {
+      font-family: var(--font-mono);
+      font-size: clamp(120px, 28vmin, 320px);
+      font-weight: 800;
+      line-height: 0.85;
+      color: #ffffff;
+      text-shadow:
+        0 0 60px rgba(var(--fill-accent-rgb), 0.4),
+        0 4px 20px rgba(0, 0, 0, 0.5);
+      position: relative;
+      z-index: 2;
+    }
+    .stage.key .channel-id {
+      color: var(--key-white);
+      text-shadow: none;
+    }
+
+    .channel-meta {
+      font-family: var(--font-mono);
+      font-size: clamp(11px, 1.8vmin, 18px);
+      color: rgba(255, 255, 255, 0.5);
+      letter-spacing: 0.1em;
+      margin-top: 2vmin;
+      position: relative;
+      z-index: 2;
+    }
+    .stage.key .channel-meta {
+      color: var(--key-white);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       CHANNEL FINGERPRINT - Unique visual per channel for mismatch detection
+
+       Mathematical basis: 8 channels = 8 segments of 45° each
+       Each channel activates ONE segment. If fill and key are mismatched,
+       the segments won't align = immediately visible error!
+
+       Also includes a rotating "radar" arm that starts at channel-specific angle.
+       ═══════════════════════════════════════════════════════════════ */
+
+    .fingerprint {
+      position: absolute;
+      bottom: 4vmin;
+      left: 50%;
+      transform: translateX(-50%);
+      width: clamp(80px, 14vmin, 140px);
+      height: clamp(80px, 14vmin, 140px);
+      z-index: 3;
+    }
+
+    .fingerprint-ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.15);
+    }
+    .stage.key .fingerprint-ring {
+      border-color: var(--key-white);
+    }
+
+    /* 8 segments - only the active one is highlighted */
+    .fingerprint-segment {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 50%;
+      height: 4px;
+      transform-origin: left center;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 0 2px 2px 0;
+    }
+    .stage.key .fingerprint-segment {
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    /* Active segment - bright and distinctive */
+    .fingerprint-segment.active {
+      background: linear-gradient(90deg,
+        rgba(var(--fill-accent-rgb), 0.9),
+        rgba(var(--fill-accent-rgb), 0.4)
+      );
+      height: 6px;
+      box-shadow: 0 0 12px rgba(var(--fill-accent-rgb), 0.6);
+    }
+    .stage.key .fingerprint-segment.active {
+      background: var(--key-white);
+      box-shadow: none;
+    }
+
+    /* Rotating radar arm - starts at channel-specific angle */
+    .fingerprint-radar {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 48%;
+      height: 3px;
+      transform-origin: left center;
+      background: linear-gradient(90deg,
+        rgba(var(--fill-secondary-rgb), 0.1),
+        rgba(var(--fill-secondary-rgb), 0.9)
+      );
+      border-radius: 0 2px 2px 0;
+      /* Animation applied via JS with channel-specific offset */
+    }
+    .stage.key .fingerprint-radar {
+      background: linear-gradient(90deg,
+        rgba(255, 255, 255, 0.1),
+        rgba(255, 255, 255, 1)
+      );
+    }
+
+    /* Center dot */
+    .fingerprint-center {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 12%;
+      height: 12%;
+      transform: translate(-50%, -50%);
+      background: var(--fill-accent);
+      border-radius: 50%;
+      box-shadow: 0 0 10px rgba(var(--fill-accent-rgb), 0.5);
+    }
+    .stage.key .fingerprint-center {
+      background: var(--key-white);
+      box-shadow: none;
+    }
+
+    /* Channel number in center */
+    .fingerprint-id {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-family: var(--font-mono);
+      font-size: clamp(10px, 1.8vmin, 16px);
+      font-weight: 700;
+      color: rgba(0, 0, 0, 0.8);
+    }
+    .stage.key .fingerprint-id {
+      color: rgba(0, 0, 0, 0.9);
+    }
+
+    /* Segment position labels (N, NE, E, SE, S, SW, W, NW) */
+    .fingerprint-labels {
+      position: absolute;
+      inset: -20%;
+      pointer-events: none;
+    }
+
+    .fingerprint-label {
+      position: absolute;
+      font-family: var(--font-mono);
+      font-size: clamp(7px, 1vmin, 10px);
+      color: rgba(255, 255, 255, 0.25);
+      transform: translate(-50%, -50%);
+    }
+    .fingerprint-label.active {
+      color: var(--fill-accent);
+      font-weight: 700;
+    }
+    .stage.key .fingerprint-label {
+      color: rgba(255, 255, 255, 0.4);
+    }
+    .stage.key .fingerprint-label.active {
+      color: var(--key-white);
+    }
+
+    /* Position each label around the circle */
+    .fingerprint-label[data-pos="1"] { top: 10%; left: 50%; }
+    .fingerprint-label[data-pos="2"] { top: 20%; left: 80%; }
+    .fingerprint-label[data-pos="3"] { top: 50%; left: 90%; }
+    .fingerprint-label[data-pos="4"] { top: 80%; left: 80%; }
+    .fingerprint-label[data-pos="5"] { top: 90%; left: 50%; }
+    .fingerprint-label[data-pos="6"] { top: 80%; left: 20%; }
+    .fingerprint-label[data-pos="7"] { top: 50%; left: 10%; }
+    .fingerprint-label[data-pos="8"] { top: 20%; left: 20%; }
+
+    /* MOTION PANEL - Split animation area */
+    .motion-panel {
+      display: grid;
+      grid-template-rows: 1fr 1fr;
+      gap: 2vmin;
+    }
+
+    /* FILL MOTION - Rotating arc (fill-specific animation) */
+    .fill-motion {
+      background: linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0.85));
+      border: 1px solid var(--panel-border);
+      border-radius: 2vmin;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .stage.key .fill-motion {
+      /* Solid white = full alpha, so the colourful animation shows in combined */
+      background: var(--key-white);
+      border: none;
+    }
+
+    .rotating-arc {
+      width: 70%;
+      height: 70%;
+      position: relative;
+    }
+
+    .arc {
+      position: absolute;
+      inset: 0;
+      border: 4px solid transparent;
+      border-radius: 50%;
+      border-top-color: var(--fill-accent);
+      border-right-color: var(--fill-secondary);
+      animation: rotate-arc 3s linear infinite;
+      filter: drop-shadow(0 0 10px rgba(var(--fill-accent-rgb), 0.5));
+    }
+    .arc:nth-child(2) {
+      inset: 15%;
+      animation-duration: 2.5s;
+      animation-direction: reverse;
+      border-top-color: var(--fill-secondary);
+      border-right-color: var(--fill-accent);
+    }
+    .arc:nth-child(3) {
+      inset: 30%;
+      animation-duration: 2s;
+      border-width: 3px;
+    }
+    .stage.key .arc {
+      border-top-color: var(--key-white);
+      border-right-color: var(--key-white);
+      filter: none;
+    }
+
+    @keyframes rotate-arc {
+      to { transform: rotate(360deg); }
+    }
+
+    .fill-motion-label {
+      position: absolute;
+      bottom: 8%;
+      font-family: var(--font-mono);
+      font-size: clamp(10px, 1.4vmin, 14px);
+      color: rgba(255, 255, 255, 0.4);
+      letter-spacing: 0.2em;
+    }
+    .stage.key .fill-motion-label {
+      color: transparent; /* Hidden in key, box is solid anyway */
+    }
+
+    /* KEY MOTION - Scanning bar (key-specific animation) */
+    .key-motion {
+      /* Fill mode: gradient background that will be revealed by scanning bar */
+      background: linear-gradient(90deg,
+        rgba(255, 107, 53, 0.4),
+        rgba(0, 212, 255, 0.3),
+        rgba(255, 107, 53, 0.4)
+      );
+      border: 1px solid var(--panel-border);
+      border-radius: 2vmin;
+      position: relative;
+      overflow: hidden;
+    }
+    .stage.key .key-motion {
+      /* Key mode: black/transparent, only scanning bar is white */
+      background: transparent;
+      border: none;
+    }
+
+    .scan-bar {
+      position: absolute;
+      top: 10%;
+      bottom: 10%;
+      width: 15%;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 1vmin;
+      animation: scan-move 2.5s ease-in-out infinite;
+    }
+    .stage.key .scan-bar {
+      background: var(--key-white);
+    }
+
+    @keyframes scan-move {
+      0%, 100% { left: 5%; }
+      50% { left: 80%; }
+    }
+
+    .scan-bar::before {
+      content: '';
+      position: absolute;
+      inset: 20% 30%;
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 0.5vmin;
+    }
+    .stage.key .scan-bar::before {
+      background: var(--key-white);
+    }
+
+    .key-motion-label {
+      position: absolute;
+      bottom: 8%;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: var(--font-mono);
+      font-size: clamp(10px, 1.4vmin, 14px);
+      /* Fill mode: very subtle */
+      color: rgba(255, 255, 255, 0.15);
+      letter-spacing: 0.2em;
+    }
+    .stage.key .key-motion-label {
+      color: var(--key-white);
+    }
+    /* Preview: KEY SYNC label visible */
+    .stage.preview .key-motion-label {
+      color: rgba(255, 255, 255, 0.7);
+    }
+    /* Preview: scanning bar cuts through gradient - simulates key masking */
+    .stage.preview .scan-bar {
+      background: rgba(255, 255, 255, 0.95);
+      box-shadow: 0 0 20px rgba(var(--fill-accent-rgb), 0.4);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       FOOTER ZONE - Status bar + PAIRED reveal
+       ═══════════════════════════════════════════════════════════════ */
+
+    .footer {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 2vmin;
+      height: clamp(50px, 8vmin, 80px);
+      align-items: center;
+    }
+
+    .status-pill {
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid var(--panel-border);
+      border-radius: 999px;
+      padding: 1.2vmin 2.5vmin;
+      font-family: var(--font-mono);
+      font-size: clamp(10px, 1.5vmin, 14px);
+      color: rgba(255, 255, 255, 0.6);
+      white-space: nowrap;
+    }
+    .stage.key .status-pill {
+      /* Solid white so any text shows in combined */
+      background: var(--key-white);
+      border: none;
+      color: var(--key-white);
+    }
+    .stage.preview .status-pill {
+      background: rgba(0, 0, 0, 0.8);
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    .status-left { justify-self: start; }
+    .status-right { justify-self: end; }
+
+    /* PAIRED REVEAL - The magic "third mode" indicator
+
+       Fill mode:  Shows colourful gradient pattern
+       Key mode:   Shows "PAIRED" as white matte cutout
+       Combined:   "PAIRED" text appears in the gradient colours!
+
+       This is the "wow" moment - text that ONLY appears when properly combined
+    */
+    .paired-reveal {
+      position: relative;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 3vmin;
+      border-radius: 1.5vmin;
+      overflow: hidden;
+      /* Fill mode: animated gradient */
+      background: linear-gradient(
+        90deg,
+        rgba(0, 212, 255, 0.6),
+        rgba(255, 107, 53, 0.5),
+        rgba(0, 212, 255, 0.6)
+      );
+      background-size: 200% 100%;
+      animation: gradient-shift 3s ease-in-out infinite;
+      border: 1px solid var(--panel-border);
+    }
+    .stage.key .paired-reveal {
+      /* Key mode: transparent background, only text is white */
+      background: transparent;
+      border: none;
+      animation: none;
+    }
+
+    @keyframes gradient-shift {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+    }
+
+    .paired-text {
+      font-family: var(--font-mono);
+      font-size: clamp(14px, 2.2vmin, 24px);
+      font-weight: 700;
+      letter-spacing: 0.25em;
+      /* Fill mode: text matches background = invisible! */
+      color: transparent;
+      /* But we use a subtle effect so it's not completely gone */
+      text-shadow: 0 0 30px rgba(255, 255, 255, 0.1);
+    }
+    .stage.key .paired-text {
+      /* Key mode: bright white matte */
+      color: var(--key-white);
+      text-shadow: none;
+    }
+    /* Preview: PAIRED text revealed! This is the magic moment */
+    .stage.preview .paired-text {
+      color: #ffffff;
+      text-shadow: 0 0 20px rgba(var(--fill-accent-rgb), 0.8);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       CORNER MARKERS - Quick visual identification
+       ═══════════════════════════════════════════════════════════════ */
+
+    .corner-marker {
+      position: absolute;
+      width: 8vmin;
+      height: 8vmin;
+      min-width: 50px;
+      min-height: 50px;
+    }
+
+    .corner-marker::before,
+    .corner-marker::after {
+      content: '';
+      position: absolute;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .corner-tl { top: var(--safe-margin); left: var(--safe-margin); }
+    .corner-tl::before { top: 0; left: 0; width: 100%; height: 2px; }
+    .corner-tl::after { top: 0; left: 0; width: 2px; height: 100%; }
+
+    .corner-tr { top: var(--safe-margin); right: var(--safe-margin); }
+    .corner-tr::before { top: 0; right: 0; width: 100%; height: 2px; }
+    .corner-tr::after { top: 0; right: 0; width: 2px; height: 100%; }
+
+    .corner-bl { bottom: var(--safe-margin); left: var(--safe-margin); }
+    .corner-bl::before { bottom: 0; left: 0; width: 100%; height: 2px; }
+    .corner-bl::after { bottom: 0; left: 0; width: 2px; height: 100%; }
+
+    .corner-br { bottom: var(--safe-margin); right: var(--safe-margin); }
+    .corner-br::before { bottom: 0; right: 0; width: 100%; height: 2px; }
+    .corner-br::after { bottom: 0; right: 0; width: 2px; height: 100%; }
+
+    .stage.key .corner-marker::before,
+    .stage.key .corner-marker::after {
+      background: var(--key-white);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       COLOUR BARS STRIP - Broadcast test pattern
+       ═══════════════════════════════════════════════════════════════ */
+
+    .colour-bars {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 0.8vmin;
+      min-height: 5px;
+      display: flex;
+    }
+
+    .colour-bars span {
+      flex: 1;
+      height: 100%;
+    }
+
+    /* EBU colour bar order */
+    .stage.fill .colour-bars span:nth-child(1) { background: #ffffff; }
+    .stage.fill .colour-bars span:nth-child(2) { background: #ffff00; }
+    .stage.fill .colour-bars span:nth-child(3) { background: #00ffff; }
+    .stage.fill .colour-bars span:nth-child(4) { background: #00ff00; }
+    .stage.fill .colour-bars span:nth-child(5) { background: #ff00ff; }
+    .stage.fill .colour-bars span:nth-child(6) { background: #ff0000; }
+    .stage.fill .colour-bars span:nth-child(7) { background: #0000ff; }
+    .stage.fill .colour-bars span:nth-child(8) { background: #000000; }
+
+    .stage.key .colour-bars span {
+      background: var(--key-white);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       MODE BADGE - Shows current mode in corner (fill only)
+       ═══════════════════════════════════════════════════════════════ */
+
+    .mode-badge {
+      position: absolute;
+      top: calc(var(--safe-margin) + 1vmin);
+      left: calc(var(--safe-margin) + 1vmin);
+      background: rgba(0, 0, 0, 0.7);
+      border: 1px solid var(--panel-border);
+      border-radius: 0.8vmin;
+      padding: 0.8vmin 1.5vmin;
+      font-family: var(--font-mono);
+      font-size: clamp(9px, 1.2vmin, 12px);
+      color: rgba(255, 255, 255, 0.6);
+      letter-spacing: 0.1em;
+    }
+    .stage.key .mode-badge {
+      background: var(--key-white);
+      border: none;
+      color: var(--key-white);
+    }
+    .stage.preview .mode-badge {
+      background: linear-gradient(135deg, rgba(var(--fill-accent-rgb), 0.3), rgba(var(--fill-secondary-rgb), 0.3));
+      color: #ffffff;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       TIMECODE DISPLAY
+       ═══════════════════════════════════════════════════════════════ */
+
+    .timecode {
+      position: absolute;
+      bottom: calc(var(--safe-margin) + 10vmin);
+      right: calc(var(--safe-margin) + 1vmin);
+      font-family: var(--font-mono);
+      font-size: clamp(11px, 1.6vmin, 16px);
+      color: rgba(255, 255, 255, 0.4);
+      letter-spacing: 0.05em;
+      font-variant-numeric: tabular-nums;
+    }
+    .stage.key .timecode {
+      color: var(--key-white);
+    }
+  </style>
+</head>
+<body>
+  <div id="stage" class="stage">
+    <!-- Fill-only background elements -->
+    <div class="fill-texture"></div>
+    <div class="fill-sweep"></div>
+
+    <!-- Corner markers -->
+    <div class="corner-marker corner-tl"></div>
+    <div class="corner-marker corner-tr"></div>
+    <div class="corner-marker corner-bl"></div>
+    <div class="corner-marker corner-br"></div>
+
+    <!-- Mode badge -->
+    <div class="mode-badge" id="modeBadge">MODE: FILL</div>
+
+    <!-- Main layout -->
+    <div class="layout">
+      <!-- Header: FILL and KEY labels -->
+      <div class="header">
+        <div class="header-box header-left">
+          <span class="fill-label" id="fillLabel">CH 01 › FILL</span>
+        </div>
+        <div class="header-box header-right">
+          <span class="key-label" id="keyLabel">CH 01 › KEY</span>
+        </div>
+      </div>
+
+      <!-- Center: ID + Motion panels -->
+      <div class="center">
+        <div class="id-panel">
+          <div class="id-rings"></div>
+          <div class="channel-id" id="channelId">01</div>
+          <div class="channel-meta">GFX CHANNEL ID</div>
+
+          <!-- Channel fingerprint - unique visual per channel -->
+          <div class="fingerprint" id="fingerprint">
+            <div class="fingerprint-ring"></div>
+            <!-- 8 segments generated by JS -->
+            <div class="fingerprint-radar" id="fingerprintRadar"></div>
+            <div class="fingerprint-center">
+              <span class="fingerprint-id" id="fingerprintId">1</span>
+            </div>
+            <div class="fingerprint-labels">
+              <span class="fingerprint-label" data-pos="1">1</span>
+              <span class="fingerprint-label" data-pos="2">2</span>
+              <span class="fingerprint-label" data-pos="3">3</span>
+              <span class="fingerprint-label" data-pos="4">4</span>
+              <span class="fingerprint-label" data-pos="5">5</span>
+              <span class="fingerprint-label" data-pos="6">6</span>
+              <span class="fingerprint-label" data-pos="7">7</span>
+              <span class="fingerprint-label" data-pos="8">8</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="motion-panel">
+          <div class="fill-motion">
+            <div class="rotating-arc">
+              <div class="arc"></div>
+              <div class="arc"></div>
+              <div class="arc"></div>
+            </div>
+            <span class="fill-motion-label">FILL SYNC</span>
+          </div>
+
+          <div class="key-motion">
+            <div class="scan-bar"></div>
+            <span class="key-motion-label">KEY SYNC</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer: Status + PAIRED reveal -->
+      <div class="footer">
+        <div class="status-pill status-left" id="statusLeft">SDI OUTPUT</div>
+        <div class="paired-reveal">
+          <span class="paired-text">✓ PAIRED</span>
+        </div>
+        <div class="status-pill status-right" id="statusRight">1920×1080</div>
+      </div>
+    </div>
+
+    <!-- Timecode -->
+    <div class="timecode" id="timecode">00:00:00:00</div>
+
+    <!-- Colour bars strip -->
+    <div class="colour-bars">
+      <span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      'use strict';
+
+      // ═══════════════════════════════════════════════════════════════
+      // URL PARAMETER PARSING
+      // Format: ?mode=fill&id=1  or  ?mode=key&id=5  or  ?id=3 (preview)
+      //
+      // Modes:
+      //   preview (default) - Combined simulation with checkerboard bg
+      //   fill              - RGB output for CasparCG fill channel
+      //   key               - Luminance matte for CasparCG key channel
+      // ═══════════════════════════════════════════════════════════════
+
+      function parseParams() {
+        const search = window.location.search.replace(/^\?/, '');
+        const params = new URLSearchParams(search);
+        return {
+          mode: params.get('mode'),
+          id: params.get('id')
+        };
+      }
+
+      const params = parseParams();
+
+      // Channel ID (1-16, zero-padded)
+      let channelNum = parseInt(params.id || '1', 10);
+      if (isNaN(channelNum) || channelNum < 1) channelNum = 1;
+      if (channelNum > 16) channelNum = 16;
+      const channelId = String(channelNum).padStart(2, '0');
+
+      // Mode: preview (default), fill, or key
+      let mode = (params.mode || 'preview').toLowerCase();
+      if (!['fill', 'key', 'preview'].includes(mode)) mode = 'preview';
+
+      // ═══════════════════════════════════════════════════════════════
+      // APPLY CONFIGURATION
+      // ═══════════════════════════════════════════════════════════════
+
+      const stage = document.getElementById('stage');
+      stage.classList.remove('fill', 'key', 'preview');
+      stage.classList.add(mode);
+
+      // Update text content
+      document.getElementById('channelId').textContent = channelId;
+      document.getElementById('fillLabel').textContent = `CH ${channelId} › FILL`;
+      document.getElementById('keyLabel').textContent = `CH ${channelId} › KEY`;
+      document.getElementById('modeBadge').textContent = `MODE: ${mode.toUpperCase()}`;
+      document.getElementById('statusLeft').textContent = `CH ${channelId} • ${mode.toUpperCase()}`;
+
+      // ═══════════════════════════════════════════════════════════════
+      // CHANNEL FINGERPRINT
+      // Unique visual identifier per channel for mismatch detection
+      // Each channel (1-8) activates its corresponding 45° segment
+      // ═══════════════════════════════════════════════════════════════
+
+      const fingerprint = document.getElementById('fingerprint');
+      const fingerprintRadar = document.getElementById('fingerprintRadar');
+      const fingerprintId = document.getElementById('fingerprintId');
+      const labels = document.querySelectorAll('.fingerprint-label');
+
+      // Determine which segment this channel uses (1-8, wrapping for 9-16)
+      const segmentIndex = ((channelNum - 1) % 8) + 1;
+
+      // Update fingerprint center ID
+      fingerprintId.textContent = segmentIndex;
+
+      // Create 8 segment lines
+      for (let i = 1; i <= 8; i++) {
+        const segment = document.createElement('div');
+        segment.className = 'fingerprint-segment' + (i === segmentIndex ? ' active' : '');
+        // Each segment is 45° apart, starting from top (270° in standard coords, or -90°)
+        const angle = -90 + (i - 1) * 45;
+        segment.style.transform = `rotate(${angle}deg)`;
+        fingerprint.insertBefore(segment, fingerprintRadar);
+      }
+
+      // Highlight active label
+      labels.forEach(label => {
+        if (parseInt(label.dataset.pos, 10) === segmentIndex) {
+          label.classList.add('active');
+        }
+      });
+
+      // Radar animation - starts at channel-specific angle
+      // This means if fill and key are mismatched, radars will be out of phase!
+      const radarBaseAngle = -90 + (segmentIndex - 1) * 45;
+
+      // Animate radar with channel-specific starting position
+      let radarStart = performance.now();
+      const radarSpeed = 0.06; // rotations per second
+
+      function animateRadar() {
+        const elapsed = performance.now() - radarStart;
+        const rotation = radarBaseAngle + (elapsed * radarSpeed * 0.36); // 0.36 = 360/1000
+        fingerprintRadar.style.transform = `rotate(${rotation}deg)`;
+        requestAnimationFrame(animateRadar);
+      }
+      requestAnimationFrame(animateRadar);
+
+      // ═══════════════════════════════════════════════════════════════
+      // TIMECODE ANIMATION
+      // Running timecode for visual confirmation of live output
+      // ═══════════════════════════════════════════════════════════════
+
+      const timecodeEl = document.getElementById('timecode');
+      const startTime = performance.now();
+
+      function formatTimecode(ms) {
+        const totalSeconds = Math.floor(ms / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        const frames = Math.floor((ms % 1000) / (1000 / 25)); // 25fps
+
+        return [
+          String(hours).padStart(2, '0'),
+          String(minutes).padStart(2, '0'),
+          String(seconds).padStart(2, '0'),
+          String(frames).padStart(2, '0')
+        ].join(':');
+      }
+
+      function updateTimecode() {
+        const elapsed = performance.now() - startTime;
+        timecodeEl.textContent = formatTimecode(elapsed);
+        requestAnimationFrame(updateTimecode);
+      }
+
+      requestAnimationFrame(updateTimecode);
+
+      // ═══════════════════════════════════════════════════════════════
+      // CASPARCG TEMPLATE INTERFACE
+      // Supports CG UPDATE for runtime changes
+      // ═══════════════════════════════════════════════════════════════
+
+      window.update = function(data) {
+        try {
+          let parsed = {};
+
+          if (typeof data === 'string') {
+            data = data.trim();
+            if (data.startsWith('{')) {
+              parsed = JSON.parse(data);
+            } else if (/^\d+$/.test(data)) {
+              parsed = { ch: data };
+            } else {
+              // Parse as query string
+              const pairs = data.replace(/^\?/, '').split('&');
+              for (const pair of pairs) {
+                const [k, v] = pair.split('=');
+                if (k && v) parsed[k] = v;
+              }
+            }
+          } else if (typeof data === 'object') {
+            parsed = data;
+          }
+
+          // Update channel
+          if (parsed.id || parsed.ch || parsed.channel) {
+            const newCh = parseInt(parsed.id || parsed.ch || parsed.channel, 10);
+            if (!isNaN(newCh) && newCh >= 1 && newCh <= 16) {
+              const newId = String(newCh).padStart(2, '0');
+              document.getElementById('channelId').textContent = newId;
+              document.getElementById('fillLabel').textContent = `CH ${newId} › FILL`;
+              document.getElementById('keyLabel').textContent = `CH ${newId} › KEY`;
+              document.getElementById('statusLeft').textContent = `CH ${newId} • ${mode.toUpperCase()}`;
+            }
+          }
+
+          // Update mode
+          if (parsed.mode) {
+            const newMode = parsed.mode.toLowerCase();
+            if (['fill', 'key', 'preview'].includes(newMode)) {
+              mode = newMode;
+              stage.classList.remove('fill', 'key', 'preview');
+              stage.classList.add(mode);
+              document.getElementById('modeBadge').textContent = `MODE: ${mode.toUpperCase()}`;
+            }
+          }
+        } catch (e) {
+          console.error('Update parse error:', e);
+        }
+      };
+
+      window.play = function() { /* Optional: trigger animations */ };
+      window.stop = function() { /* Optional: stop animations */ };
+
+      // ═══════════════════════════════════════════════════════════════
+      // AUDIO IDENT SYSTEM — TSG Broadcast Identifier
+      // Pre-rendered WAV files + Web Audio API with TRUE stereo separation
+      //
+      // Enable via ?audio=1 parameter
+      //
+      // Schedule (per minute):
+      //   :00 — Intro (both) + left channel ident (LEFT ONLY)
+      //   :15 — Right channel ident (RIGHT ONLY)
+      //   :30 — Left channel short (LEFT ONLY)
+      //   :45 — Right channel short (RIGHT ONLY)
+      //
+      // Audio files located in: ./audio/
+      // See ./audio/README.md for file specifications
+      // ═══════════════════════════════════════════════════════════════
+
+      // Audio always enabled in fill mode (it's an ident programme)
+      const audioEnabled = (mode === 'fill');
+
+      if (audioEnabled) {
+        // Feed number for announcements (1-8)
+        const feedNum = ((channelNum - 1) % 8) + 1;
+
+        // Audio context and buffers
+        let audioCtx = null;
+        let masterGain = null;
+        const audioBuffers = {};
+        let audioLoaded = false;
+        let loadingIndicator = null;
+
+        // File manifest for this feed
+        // Resolve audio path relative to current document location
+        const basePath = new URL('../audio/', window.location.href).href;
+        const audioFiles = {
+          left: `${basePath}feed-${feedNum}-left.mp3`,
+          right: `${basePath}feed-${feedNum}-right.mp3`
+        };
+        console.log('Audio files:', audioFiles);
+
+        // Initialise audio context
+        function initAudio() {
+          if (audioCtx) return Promise.resolve();
+
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+          // Master gain at -18 dBFS
+          masterGain = audioCtx.createGain();
+          masterGain.gain.value = 0.126; // 10^(-18/20)
+          masterGain.connect(audioCtx.destination);
+
+          return Promise.resolve();
+        }
+
+        // Load a single audio file
+        async function loadAudioFile(url) {
+          try {
+            const response = await fetch(url);
+            if (!response.ok) {
+              console.warn(`Audio file not found: ${url}`);
+              return null;
+            }
+            const arrayBuffer = await response.arrayBuffer();
+            return await audioCtx.decodeAudioData(arrayBuffer);
+          } catch (e) {
+            console.warn(`Failed to load audio: ${url}`, e);
+            return null;
+          }
+        }
+
+        // Load all audio files
+        async function loadAllAudio() {
+          await initAudio();
+
+          const loadPromises = Object.entries(audioFiles).map(async ([key, url]) => {
+            const buffer = await loadAudioFile(url);
+            if (buffer) {
+              audioBuffers[key] = buffer;
+            }
+          });
+
+          await Promise.all(loadPromises);
+
+          const loadedCount = Object.keys(audioBuffers).length;
+          const totalCount = Object.keys(audioFiles).length;
+
+          console.log(`Audio loaded: ${loadedCount}/${totalCount} files`);
+          audioLoaded = loadedCount > 0;
+
+          return audioLoaded;
+        }
+
+        // Play audio buffer with stereo panning
+        // pan: -1 = full left, 0 = centre, 1 = full right
+        function playBuffer(buffer, pan, callback) {
+          if (!buffer || !audioCtx) {
+            if (callback) callback();
+            return;
+          }
+
+          if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+          }
+
+          const source = audioCtx.createBufferSource();
+          const panner = audioCtx.createStereoPanner();
+
+          source.buffer = buffer;
+          panner.pan.value = pan;
+
+          source.connect(panner);
+          panner.connect(masterGain);
+
+          source.onended = () => {
+            if (callback) callback();
+          };
+
+          source.start();
+        }
+
+        // Play identifying tone with stereo panning
+        function playTone(frequency, duration, pan) {
+          if (!audioCtx) return;
+          if (audioCtx.state === 'suspended') audioCtx.resume();
+
+          const osc = audioCtx.createOscillator();
+          const toneGain = audioCtx.createGain();
+          const panner = audioCtx.createStereoPanner();
+
+          osc.type = 'sine';
+          osc.frequency.value = frequency;
+
+          // Envelope for smooth start/stop
+          toneGain.gain.setValueAtTime(0, audioCtx.currentTime);
+          toneGain.gain.linearRampToValueAtTime(1, audioCtx.currentTime + 0.01);
+          toneGain.gain.setValueAtTime(1, audioCtx.currentTime + duration - 0.01);
+          toneGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + duration);
+
+          panner.pan.value = pan;
+
+          osc.connect(toneGain);
+          toneGain.connect(panner);
+          panner.connect(masterGain);
+
+          osc.start();
+          osc.stop(audioCtx.currentTime + duration);
+        }
+
+        // Play 3-pip ident pattern
+        function playPips(pan) {
+          const freq = 1000;
+          playTone(freq, 0.1, pan);
+          setTimeout(() => playTone(freq, 0.1, pan), 150);
+          setTimeout(() => playTone(freq, 0.3, pan), 300);
+        }
+
+        // Schedule functions — TRUE STEREO (voice only, no tones)
+        function playLeft() {
+          playBuffer(audioBuffers.left, -1);  // LEFT ONLY
+        }
+
+        function playRight() {
+          playBuffer(audioBuffers.right, 1);  // RIGHT ONLY
+        }
+
+        function playIntroAndLeft() {
+          playLeft();
+        }
+
+        function triggerIdent() {
+          if (!audioLoaded) return;
+
+          const seconds = new Date().getSeconds();
+
+          // Schedule: LEFT at :00/:30, RIGHT at :15/:45
+          if (seconds >= 0 && seconds < 5) {
+            playLeft();          // :00 — LEFT channel
+          } else if (seconds >= 15 && seconds < 20) {
+            playRight();         // :15 — RIGHT channel
+          } else if (seconds >= 30 && seconds < 35) {
+            playLeft();          // :30 — LEFT channel
+          } else if (seconds >= 45 && seconds < 50) {
+            playRight();         // :45 — RIGHT channel
+          }
+        }
+
+        function scheduleIdent() {
+          // Calculate time until next quarter minute (:00, :15, :30, :45)
+          const now = new Date();
+          const seconds = now.getSeconds();
+          const ms = now.getMilliseconds();
+
+          const quarters = [0, 15, 30, 45, 60];
+          let nextQuarter = quarters.find(q => q > seconds) || 60;
+          const msUntilNext = ((nextQuarter === 60 ? 60 - seconds : nextQuarter - seconds) * 1000) - ms;
+
+          console.log(`Audio ident: next trigger in ${Math.round(msUntilNext/1000)}s at :${nextQuarter === 60 ? '00' : nextQuarter}`);
+
+          // Schedule first trigger at exact quarter minute
+          setTimeout(() => {
+            triggerIdent();
+            // Then repeat exactly every 15 seconds
+            setInterval(triggerIdent, 15000);
+          }, msUntilNext);
+
+          // Show prompt if browser needs user interaction (no auto-play)
+          if (audioCtx.state === 'suspended') {
+            showAudioPrompt();
+          }
+        }
+
+        // Show loading indicator
+        function showLoadingIndicator() {
+          loadingIndicator = document.createElement('div');
+          loadingIndicator.style.cssText = `
+            position: absolute;
+            top: calc(var(--safe-margin) + 1vmin);
+            right: calc(var(--safe-margin) + 1vmin);
+            background: linear-gradient(135deg, rgba(255, 180, 0, 0.9), rgba(200, 140, 0, 0.9));
+            border-radius: 0.8vmin;
+            padding: 0.8vmin 1.5vmin;
+            font-family: var(--font-mono);
+            font-size: clamp(9px, 1.2vmin, 12px);
+            color: #ffffff;
+            letter-spacing: 0.1em;
+          `;
+          loadingIndicator.textContent = '⏳ LOADING AUDIO...';
+          document.getElementById('stage').appendChild(loadingIndicator);
+        }
+
+        // Show prompt if audio context needs user interaction
+        function showAudioPrompt() {
+          const prompt = document.createElement('div');
+          prompt.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95);
+            border: 2px solid var(--fill-accent);
+            border-radius: 2vmin;
+            padding: 4vmin;
+            text-align: center;
+            z-index: 9999;
+            cursor: pointer;
+            font-family: var(--font-mono);
+          `;
+          prompt.innerHTML = `
+            <div style="font-size: 3vmin; color: var(--fill-accent); margin-bottom: 2vmin;">
+              🔊 AUDIO IDENT
+            </div>
+            <div style="font-size: 1.8vmin; color: #ffffff; margin-bottom: 2vmin;">
+              Click to enable audio identification
+            </div>
+            <div style="font-size: 1.2vmin; color: rgba(255,255,255,0.5);">
+              Browser requires user interaction for audio playback
+            </div>
+          `;
+
+          prompt.addEventListener('click', () => {
+            audioCtx.resume().then(() => {
+              prompt.remove();
+              playIntroAndLeft();
+            });
+          });
+
+          document.body.appendChild(prompt);
+        }
+
+        // Show ready indicator
+        function showReadyIndicator() {
+          if (loadingIndicator) {
+            loadingIndicator.remove();
+          }
+
+          const audioIndicator = document.createElement('div');
+          audioIndicator.id = 'audioIndicator';
+          audioIndicator.style.cssText = `
+            position: absolute;
+            top: calc(var(--safe-margin) + 1vmin);
+            right: calc(var(--safe-margin) + 1vmin);
+            background: linear-gradient(135deg, rgba(0, 200, 100, 0.9), rgba(0, 150, 80, 0.9));
+            border-radius: 0.8vmin;
+            padding: 0.8vmin 1.5vmin;
+            font-family: var(--font-mono);
+            font-size: clamp(9px, 1.2vmin, 12px);
+            color: #ffffff;
+            letter-spacing: 0.1em;
+            display: flex;
+            align-items: center;
+            gap: 0.8vmin;
+          `;
+          audioIndicator.innerHTML = `
+            <span style="display:inline-block;width:8px;height:8px;background:#fff;border-radius:50%;animation:pulse-dot 1s ease-in-out infinite;"></span>
+            AUDIO IDENT • FEED ${feedNum}
+          `;
+
+          const style = document.createElement('style');
+          style.textContent = `
+            @keyframes pulse-dot {
+              0%, 100% { opacity: 1; transform: scale(1); }
+              50% { opacity: 0.5; transform: scale(0.8); }
+            }
+          `;
+          document.head.appendChild(style);
+          document.getElementById('stage').appendChild(audioIndicator);
+        }
+
+        // Show error indicator
+        function showErrorIndicator() {
+          if (loadingIndicator) {
+            loadingIndicator.style.background = 'linear-gradient(135deg, rgba(255, 80, 80, 0.9), rgba(200, 50, 50, 0.9))';
+            loadingIndicator.textContent = '⚠️ AUDIO FILES NOT FOUND';
+          }
+        }
+
+        // Initialise
+        showLoadingIndicator();
+        loadAllAudio().then(success => {
+          if (success) {
+            showReadyIndicator();
+            scheduleIdent();
+          } else {
+            showErrorIndicator();
+          }
+        });
+      }
+
+    })();
+  </script>
+</body>
+</html>

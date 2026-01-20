@@ -43,6 +43,45 @@
 - [ ] AMCP connection status polling
 - [ ] Auto-reconnect on connection loss
 
+### Key/Fill Test Pattern Integration
+
+Integrate the `test/key-fill-identifier.html` test pattern into the GUI for one-click channel verification without requiring the CasparCG client.
+
+- [ ] **Test Pattern Server**
+  - [ ] Embed static HTTP server in Tauri backend (or use Tauri's asset protocol)
+  - [ ] Serve `test/key-fill-identifier.html` at predictable URL
+  - [ ] Support dynamic port configuration
+
+- [ ] **Channel Test UI**
+  - [ ] Add "Test Channels" button to toolbar/menu
+  - [ ] Toggle button sends AMCP commands to all configured channels:
+    ```
+    CG {ch}-20 ADD 0 "http://localhost:{port}/key-fill-identifier.html?mode=fill&id={ch}" 1
+    CG {ch}-19 ADD 0 "http://localhost:{port}/key-fill-identifier.html?mode=key&id={ch}" 1
+    MIXER {ch}-19 KEYER 1
+    ```
+  - [ ] "Stop Test" clears all test layers
+  - [ ] Per-channel test toggle in channel list
+
+- [ ] **Audio Ident System**
+  - [ ] Implement Web Speech API ident in test pattern
+  - [ ] British English voice (Google UK English Female, rate 0.9, pitch 0.9)
+  - [ ] Stereo test tones via Web Audio API with `StereoPannerNode`
+  - [ ] Timed announcement schedule:
+    | Time | Left Channel | Right Channel |
+    |------|--------------|---------------|
+    | :00 | Intro + left ident | Intro |
+    | :15 | — | Right ident |
+    | :30 | Left short | — |
+    | :45 | — | Right short |
+  - [ ] Enable via `?audio=1` URL parameter
+  - [ ] Feed number in announcements matches channel ID
+
+- [ ] **Preview Panel**
+  - [ ] Embedded WebView showing preview mode of test pattern
+  - [ ] Dropdown to select channel for preview
+  - [ ] Visual confirmation without SDI monitoring
+
 ### Low Priority (Polish)
 
 - [ ] Application icon and branding
