@@ -182,16 +182,45 @@
       text-align: center;
       font-family: var(--font-mono);
       font-weight: 200;
-      font-size: clamp(11px, 2vmin, 20px);
+      font-size: clamp(10px, 1.7vmin, 18px);
       line-height: 1.4;
       letter-spacing: 0.15em;
       color: #ffffff;
       text-transform: uppercase;
       flex: 0 0 auto;
+      white-space: nowrap;
     }
 
     .header-tagline-strong {
       font-weight: 700;
+    }
+
+    .header-tagline > span {
+      display: block;
+      width: 100%;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .header-tagline-strong {
+      font-size: 2em;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+      flex: 0 0 auto;
+      display: inline-flex;
+      width: auto;
+      align-self: center;
+    }
+
+    .header-tagline-strong,
+    .header-tagline-strong * {
+      white-space: nowrap;
+    }
+
+    .mirror-glyph {
+      display: inline-block;
+      transform: scaleX(-1);
+      width: auto;
     }
 
 
@@ -895,7 +924,7 @@
           </div>
           <div class="header-tagline">
             <span>KEY+FILL</span>
-            <span class="header-tagline-strong">IDENT</span>
+            <span class="header-tagline-strong">ID<span class="mirror-glyph">3</span>NT</span>
             <span>PROGRAMME</span>
           </div>
         </div>
