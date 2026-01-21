@@ -4,10 +4,12 @@
 mod amcp;
 mod config;
 mod decklink;
+mod http_server;
 mod system;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use tauri::Manager;
 use tokio::sync::Mutex;
 
 use config::{
@@ -19,6 +21,7 @@ use decklink::{DeckLinkDevice, DuplexMode};
 pub struct AppState {
     pub amcp_client: Arc<Mutex<amcp::AmcpClient>>,
     pub gui_settings: Arc<Mutex<GuiSettings>>,
+    pub test_server: http_server::TestServerState,
 }
 
 impl Default for AppState {
@@ -26,6 +29,7 @@ impl Default for AppState {
         Self {
             amcp_client: Arc::new(Mutex::new(amcp::AmcpClient::new())),
             gui_settings: Arc::new(Mutex::new(GuiSettings::load())),
+            test_server: http_server::create_test_server_state(),
         }
     }
 }
@@ -239,6 +243,126 @@ async fn amcp_send_command(
 }
 
 // ============================================================================
+// Test Server Commands
+// ============================================================================
+
+/// Start the test HTTP server for serving test patterns to CasparCG
+///
+/// Returns the port the server is running on.
+#[tauri::command]
+async fn start_test_server(
+    port: Option<u16>,
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<u16, String> {
+    // Determine the test directory path
+    // In development, it's relative to the project root
+    // In production, it's bundled with the app resources
+    let test_dir = if cfg!(debug_assertions) {
+        // Development: use project root test/ directory
+        let mut path = std::env::current_dir()
+            .map_err(|e| format!("Failed to get current directory: {}", e))?;
+        path.push("test");
+        if !path.exists() {
+            // Try parent directory (in case running from src-tauri)
+            path = std::env::current_dir()
+                .map_err(|e| format!("Failed to get current directory: {}", e))?;
+            path.pop();
+            path.push("test");
+        }
+        path
+    } else {
+        // Production: use bundled resources
+        app.path()
+            .resource_dir()
+            .map_err(|e| format!("Failed to get resource directory: {}", e))?
+            .join("test")
+    };
+
+    http_server::start_server(state.test_server.clone(), port, test_dir).await
+}
+
+/// Stop the test HTTP server
+#[tauri::command]
+async fn stop_test_server(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    http_server::stop_server(state.test_server.clone()).await
+}
+
+/// Get the URL of the test server (if running)
+#[tauri::command]
+async fn get_test_server_url(state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
+    Ok(http_server::get_server_url(state.test_server.clone()).await)
+}
+
+/// Start a channel test by loading fill/key identifier patterns
+#[tauri::command]
+async fn test_channel(
+    channel: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    // Get the test server URL
+    let server_url = http_server::get_server_url(state.test_server.clone())
+        .await
+        .ok_or_else(|| "Test server is not running. Start it first.".to_string())?;
+
+    // Load the test pattern
+    let client = state.amcp_client.lock().await;
+    client
+        .start_channel_test(channel, &server_url)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Stop a channel test by clearing the test layers
+#[tauri::command]
+async fn stop_channel_test(
+    channel: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let client = state.amcp_client.lock().await;
+    client
+        .stop_channel_test(channel)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Test all configured channels
+#[tauri::command]
+async fn test_all_channels(
+    channel_count: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    // Get the test server URL
+    let server_url = http_server::get_server_url(state.test_server.clone())
+        .await
+        .ok_or_else(|| "Test server is not running. Start it first.".to_string())?;
+
+    // Load test patterns on all channels
+    let client = state.amcp_client.lock().await;
+    for channel in 1..=channel_count {
+        client
+            .start_channel_test(channel, &server_url)
+            .await
+            .map_err(|e| format!("Failed to test channel {}: {}", channel, e))?;
+    }
+
+    Ok(())
+}
+
+/// Stop all channel tests
+#[tauri::command]
+async fn stop_all_channel_tests(
+    channel_count: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let client = state.amcp_client.lock().await;
+    client
+        .stop_all_channel_tests(channel_count)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ============================================================================
 // System Info Commands
 // ============================================================================
 
@@ -397,6 +521,14 @@ pub fn run() {
             amcp_version,
             amcp_info_system,
             amcp_send_command,
+            // Test server commands
+            start_test_server,
+            stop_test_server,
+            get_test_server_url,
+            test_channel,
+            stop_channel_test,
+            test_all_channels,
+            stop_all_channel_tests,
             // System info commands
             get_ndi_version,
             get_scanner_version,

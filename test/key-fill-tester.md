@@ -193,7 +193,7 @@ The identifier includes an optional audio ident programme using Web Speech API a
 
 ### Features
 
-- **Speech synthesis:** British English announcements (Google UK English Female)
+- **Speech synthesis:** Voice announcements via Web Speech API
 - **Test tone:** 1 kHz sine wave at -18 dBFS (EBU reference level)
 - **Stereo verification:** Left/right channel identification
 - **Timed sequence:** Announcements at :00, :15, :30, :45 each minute

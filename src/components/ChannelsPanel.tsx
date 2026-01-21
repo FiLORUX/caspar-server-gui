@@ -22,7 +22,17 @@ import {
 } from '../lib/types';
 
 export function ChannelsPanel() {
-  const { currentConfig, updateConfig, deckLinkDevices } = useAppStore();
+  const {
+    currentConfig,
+    updateConfig,
+    deckLinkDevices,
+    connection,
+    channelsTesting,
+    testAllChannels,
+    stopAllTests,
+    testChannel,
+    stopChannelTest,
+  } = useAppStore();
 
   if (!currentConfig) {
     return (
@@ -33,6 +43,19 @@ export function ChannelsPanel() {
   }
 
   const channels = currentConfig.caspar.channels;
+  const anyChannelTesting = channelsTesting.size > 0;
+
+  const handleTestChannels = async () => {
+    try {
+      if (anyChannelTesting) {
+        await stopAllTests();
+      } else {
+        await testAllChannels();
+      }
+    } catch (error) {
+      console.error('Test channels failed:', error);
+    }
+  };
 
   const updateChannels = (newChannels: Channel[]) => {
     const newConfig: GlobalConfig = {
@@ -69,12 +92,28 @@ export function ChannelsPanel() {
             Configure video channels and their output consumers
           </p>
         </div>
-        <button
-          onClick={addChannel}
-          className="px-4 py-2 bg-[var(--color-accent)] text-white rounded hover:bg-[var(--color-accent-hover)] transition-colors"
-        >
-          + Add Channel
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleTestChannels}
+            disabled={!connection.connected}
+            className={`px-4 py-2 rounded transition-colors ${
+              !connection.connected
+                ? 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-not-allowed'
+                : anyChannelTesting
+                  ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+            }`}
+            title={!connection.connected ? 'Connect to CasparCG server first' : undefined}
+          >
+            {anyChannelTesting ? '■ Stop Test' : '▶ Test Channels'}
+          </button>
+          <button
+            onClick={addChannel}
+            className="px-4 py-2 bg-[var(--color-accent)] text-white rounded hover:bg-[var(--color-accent-hover)] transition-colors"
+          >
+            + Add Channel
+          </button>
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -87,6 +126,19 @@ export function ChannelsPanel() {
             onRemove={() => removeChannel(index)}
             canRemove={channels.length > 1}
             deckLinkDevices={deckLinkDevices}
+            isTesting={channelsTesting.has(index + 1)}
+            canTest={connection.connected}
+            onToggleTest={async () => {
+              try {
+                if (channelsTesting.has(index + 1)) {
+                  await stopChannelTest(index + 1);
+                } else {
+                  await testChannel(index + 1);
+                }
+              } catch (error) {
+                console.error('Toggle channel test failed:', error);
+              }
+            }}
           />
         ))}
       </div>
@@ -101,6 +153,9 @@ interface ChannelCardProps {
   onRemove: () => void;
   canRemove: boolean;
   deckLinkDevices: { index: number; display_name: string }[];
+  isTesting: boolean;
+  canTest: boolean;
+  onToggleTest: () => void;
 }
 
 function ChannelCard({
@@ -110,6 +165,9 @@ function ChannelCard({
   onRemove,
   canRemove,
   deckLinkDevices,
+  isTesting,
+  canTest,
+  onToggleTest,
 }: ChannelCardProps) {
   const [isExpanded, setIsExpanded] = useState(true);
 
@@ -174,17 +232,41 @@ function ChannelCard({
               </option>
             ))}
           </select>
+
+          {/* Test indicator */}
+          {isTesting && (
+            <span className="px-2 py-0.5 text-xs font-medium bg-emerald-600/20 text-emerald-400 rounded">
+              TESTING
+            </span>
+          )}
         </div>
 
-        {canRemove && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={onRemove}
-            className="text-[var(--color-text-muted)] hover:text-red-400"
-            title="Remove channel"
+            onClick={onToggleTest}
+            disabled={!canTest}
+            className={`px-2 py-1 text-xs rounded transition-colors ${
+              !canTest
+                ? 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-not-allowed'
+                : isTesting
+                  ? 'bg-amber-600/20 text-amber-400 hover:bg-amber-600/30'
+                  : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-border)]'
+            }`}
+            title={!canTest ? 'Connect to CasparCG server first' : isTesting ? 'Stop test' : 'Test channel'}
           >
-            ✕
+            {isTesting ? '■ Stop' : '▶ Test'}
           </button>
-        )}
+
+          {canRemove && (
+            <button
+              onClick={onRemove}
+              className="text-[var(--color-text-muted)] hover:text-red-400"
+              title="Remove channel"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Channel content */}

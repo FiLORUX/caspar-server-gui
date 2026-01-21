@@ -47,6 +47,17 @@ interface AppState {
   loadSettings: () => Promise<void>;
   saveSettings: (settings: Partial<GuiSettings>) => Promise<void>;
 
+  // Test Server State
+  testServerRunning: boolean;
+  testServerUrl: string | null;
+  channelsTesting: Set<number>;
+  startTestServer: () => Promise<void>;
+  stopTestServer: () => Promise<void>;
+  testAllChannels: () => Promise<void>;
+  stopAllTests: () => Promise<void>;
+  testChannel: (channel: number) => Promise<void>;
+  stopChannelTest: (channel: number) => Promise<void>;
+
   // Initialisation
   initialise: () => Promise<void>;
 }
@@ -219,9 +230,107 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  // Test Server State
+  testServerRunning: false,
+  testServerUrl: null,
+  channelsTesting: new Set<number>(),
+
+  startTestServer: async () => {
+    try {
+      const port = await tauri.startTestServer();
+      const url = await tauri.getTestServerUrl();
+      set({ testServerRunning: true, testServerUrl: url });
+      console.log(`Test server started on port ${port}`);
+    } catch (error) {
+      console.error('Failed to start test server:', error);
+      throw error;
+    }
+  },
+
+  stopTestServer: async () => {
+    try {
+      await tauri.stopTestServer();
+      set({ testServerRunning: false, testServerUrl: null });
+    } catch (error) {
+      console.error('Failed to stop test server:', error);
+      throw error;
+    }
+  },
+
+  testAllChannels: async () => {
+    const { currentConfig, testServerRunning, startTestServer } = get();
+    if (!currentConfig) return;
+
+    // Ensure test server is running
+    if (!testServerRunning) {
+      await startTestServer();
+    }
+
+    const channelCount = currentConfig.caspar.channels.length;
+    try {
+      await tauri.testAllChannels(channelCount);
+      // Mark all channels as testing
+      const testingChannels = new Set<number>();
+      for (let i = 1; i <= channelCount; i++) {
+        testingChannels.add(i);
+      }
+      set({ channelsTesting: testingChannels });
+    } catch (error) {
+      console.error('Failed to test channels:', error);
+      throw error;
+    }
+  },
+
+  stopAllTests: async () => {
+    const { currentConfig } = get();
+    if (!currentConfig) return;
+
+    const channelCount = currentConfig.caspar.channels.length;
+    try {
+      await tauri.stopAllChannelTests(channelCount);
+      set({ channelsTesting: new Set<number>() });
+    } catch (error) {
+      console.error('Failed to stop channel tests:', error);
+      throw error;
+    }
+  },
+
+  testChannel: async (channel: number) => {
+    const { testServerRunning, startTestServer, channelsTesting } = get();
+
+    // Ensure test server is running
+    if (!testServerRunning) {
+      await startTestServer();
+    }
+
+    try {
+      await tauri.testChannel(channel);
+      const newTesting = new Set(channelsTesting);
+      newTesting.add(channel);
+      set({ channelsTesting: newTesting });
+    } catch (error) {
+      console.error(`Failed to test channel ${channel}:`, error);
+      throw error;
+    }
+  },
+
+  stopChannelTest: async (channel: number) => {
+    const { channelsTesting } = get();
+
+    try {
+      await tauri.stopChannelTest(channel);
+      const newTesting = new Set(channelsTesting);
+      newTesting.delete(channel);
+      set({ channelsTesting: newTesting });
+    } catch (error) {
+      console.error(`Failed to stop channel ${channel} test:`, error);
+      throw error;
+    }
+  },
+
   // Initialisation
   initialise: async () => {
-    const { loadSettings, loadProfiles, loadDeckLinkDevices, loadSystemVersions, settings } = get();
+    const { loadSettings, loadProfiles, loadDeckLinkDevices, loadSystemVersions } = get();
 
     // Load settings first
     await loadSettings();

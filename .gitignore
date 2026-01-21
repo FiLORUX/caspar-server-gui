@@ -27,5 +27,5 @@ Cargo.lock
 *.sln
 *.sw?
 
-# Claude Code
-.claude/
+# Local development
+.local/

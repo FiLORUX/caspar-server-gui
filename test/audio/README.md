@@ -1,6 +1,6 @@
 # Audio Ident Files
 
-British English female voice recordings for the TSG Key/Fill Identifier.
+Voice recordings for the TSG Key/Fill Identifier.
 
 ## Required Files (33 total)
 
@@ -64,7 +64,6 @@ British English female voice recordings for the TSG Key/Fill Identifier.
 
 ## Voice Requirements
 
-- British English female
 - Clear, professional broadcast style
 - Moderate pace (rate ~0.9)
 - Slightly lower pitch (pitch ~0.9)

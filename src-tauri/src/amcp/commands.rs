@@ -11,7 +11,94 @@ pub struct SystemInfo {
     pub channels: u32,
 }
 
+// Test pattern layers - high numbers to avoid conflicts with production content
+const TEST_FILL_LAYER: u32 = 20;
+const TEST_KEY_LAYER: u32 = 19;
+
 impl AmcpClient {
+    // ═══════════════════════════════════════════════════════════════
+    // CHANNEL TEST COMMANDS
+    // Load fill/key test patterns for visual verification
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Start a channel test by loading fill/key identifier patterns
+    ///
+    /// Loads the test pattern on layers 19 (key) and 20 (fill), with keyer enabled.
+    /// The test URL should point to the HTTP server serving the test patterns.
+    pub async fn start_channel_test(
+        &self,
+        channel: u32,
+        test_server_url: &str,
+    ) -> Result<(), AmcpError> {
+        // Build URLs for fill and key modes
+        let fill_url = format!(
+            "[HTML] {}/key-fill-identifier.html?mode=fill&id={}",
+            test_server_url, channel
+        );
+        let key_url = format!(
+            "[HTML] {}/key-fill-identifier.html?mode=key&id={}",
+            test_server_url, channel
+        );
+
+        // Load fill on layer 20
+        let fill_cmd = format!("PLAY {}-{} {}", channel, TEST_FILL_LAYER, fill_url);
+        let response = self.send_command(&fill_cmd).await?;
+        if !response.is_success() {
+            return Err(AmcpError::Protocol(format!(
+                "Failed to load fill pattern: {} {}",
+                response.code, response.message
+            )));
+        }
+
+        // Load key on layer 19
+        let key_cmd = format!("PLAY {}-{} {}", channel, TEST_KEY_LAYER, key_url);
+        let response = self.send_command(&key_cmd).await?;
+        if !response.is_success() {
+            return Err(AmcpError::Protocol(format!(
+                "Failed to load key pattern: {} {}",
+                response.code, response.message
+            )));
+        }
+
+        // Enable keyer on layer 19 to use it as external key for layer 20
+        let keyer_cmd = format!("MIXER {}-{} KEYER 1", channel, TEST_KEY_LAYER);
+        let response = self.send_command(&keyer_cmd).await?;
+        if !response.is_success() {
+            return Err(AmcpError::Protocol(format!(
+                "Failed to enable keyer: {} {}",
+                response.code, response.message
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Stop a channel test by clearing the test layers
+    pub async fn stop_channel_test(&self, channel: u32) -> Result<(), AmcpError> {
+        // Clear layer 20 (fill)
+        let clear_fill = format!("CLEAR {}-{}", channel, TEST_FILL_LAYER);
+        self.send_command(&clear_fill).await?;
+
+        // Clear layer 19 (key)
+        let clear_key = format!("CLEAR {}-{}", channel, TEST_KEY_LAYER);
+        self.send_command(&clear_key).await?;
+
+        Ok(())
+    }
+
+    /// Stop all channel tests (useful when disconnecting or cleaning up)
+    pub async fn stop_all_channel_tests(&self, channel_count: u32) -> Result<(), AmcpError> {
+        for channel in 1..=channel_count {
+            // Ignore errors - channel might not have a test running
+            let _ = self.stop_channel_test(channel).await;
+        }
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // INFO AND VERSION COMMANDS
+    // ═══════════════════════════════════════════════════════════════
+
     /// Get CasparCG server version
     pub async fn version(&self) -> Result<String, AmcpError> {
         let response = self.send_command("VERSION").await?;

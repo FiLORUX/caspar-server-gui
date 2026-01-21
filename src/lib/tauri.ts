@@ -114,6 +114,38 @@ export async function amcpSendCommand(command: string): Promise<AmcpResponse> {
 }
 
 // ============================================================================
+// Test Server Commands
+// ============================================================================
+
+export async function startTestServer(port?: number): Promise<number> {
+  return invoke('start_test_server', { port });
+}
+
+export async function stopTestServer(): Promise<void> {
+  return invoke('stop_test_server');
+}
+
+export async function getTestServerUrl(): Promise<string | null> {
+  return invoke('get_test_server_url');
+}
+
+export async function testChannel(channel: number): Promise<void> {
+  return invoke('test_channel', { channel });
+}
+
+export async function stopChannelTest(channel: number): Promise<void> {
+  return invoke('stop_channel_test', { channel });
+}
+
+export async function testAllChannels(channelCount: number): Promise<void> {
+  return invoke('test_all_channels', { channelCount });
+}
+
+export async function stopAllChannelTests(channelCount: number): Promise<void> {
+  return invoke('stop_all_channel_tests', { channelCount });
+}
+
+// ============================================================================
 // System Info Commands
 // ============================================================================
 

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="sv">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1" />
@@ -26,11 +26,11 @@
       padding: 0;
       width: 100%;
       height: 100%;
-      background: transparent; /* viktigt för CasparCG key+fill */
+      background: transparent; /* essential for CasparCG key+fill */
       overflow: hidden;
     }
 
-    /* Hela scenen */
+    /* Full stage */
     .stage{
       position: relative;
       width: 100vw;
@@ -39,7 +39,7 @@
       font-family: var(--ui);
     }
 
-    /* Fill-only “smuts” (svag struktur) – slås av i key-mode */
+    /* Fill-only texture (subtle structure) – disabled in key mode */
     .stage.fill .texture{
       position:absolute; inset:0;
       background:
@@ -50,7 +50,7 @@
     }
     .stage.key .texture{ display:none; }
 
-    /* Safe markers (bara fill) */
+    /* Safe markers (fill only) */
     .safe { position:absolute; inset:0; pointer-events:none; }
     .stage.key .safe{ display:none; }
 
@@ -82,7 +82,7 @@
     .safe .cross:before{ width: 40vmin; height: 2px; }
     .safe .cross:after{ width: 2px; height: 40vmin; }
 
-    /* Header bar (där vi separerar “FILL” vs “KEY”) */
+    /* Header bar (separates "FILL" vs "KEY" labels) */
     .hdr{
       position:absolute;
       left: var(--pad);
@@ -104,7 +104,7 @@
       padding: 0 2.2vmin;
     }
 
-    /* I key-mode vill vi ha en ren matte: inga tunna linjer som “skrapar” */
+    /* In key mode we want a clean matte: no thin lines that may cause artefacts */
     .stage.key .box{
       border: none;
       background: rgba(255,255,255,1);
@@ -120,12 +120,12 @@
       text-overflow: ellipsis;
     }
 
-    /* Fill: vänster visar FILL-text, höger tom */
+    /* Fill mode: left shows FILL text, right hidden */
     .stage.fill .leftLabel{ color: var(--text); }
     .stage.fill .rightLabel{ display:none; }
 
-    /* Key: höger visar KEY-text som matte-text (alpha), vänster är bara en solid “hållare”
-       för att fill-texten inte ska klippas bort av key-masken. */
+    /* Key mode: right shows KEY text as matte (alpha), left is a solid placeholder
+       to prevent fill text from being clipped by the key mask. */
     .stage.key .leftLabel{ display:none; }
     .stage.key .rightLabel{
       display:block;
@@ -233,7 +233,7 @@
       box-shadow: none;
     }
 
-    /* Bars panel (”testfärger”) – fill får färg, key får bara matte-rutor */
+    /* Bars panel (test colours) – fill gets colour, key gets matte blocks only */
     .bars{
       display:grid;
       grid-template-rows: 1fr auto;
@@ -295,7 +295,7 @@
       height: 100%;
     }
 
-    /* Fill färger */
+    /* Fill colours */
     .stage.fill .c1{ background: rgb(191,191,191); }
     .stage.fill .c2{ background: rgb(191,191,0); }
     .stage.fill .c3{ background: rgb(0,191,191); }
@@ -304,7 +304,7 @@
     .stage.fill .c6{ background: rgb(191,0,0); }
     .stage.fill .c7{ background: rgb(0,0,191); }
 
-    /* Key: bara matte-block (du ser att du tittar på KEY) */
+    /* Key mode: matte blocks only (visual indicator you're viewing KEY output) */
     .stage.key .barC{ background: rgba(255,255,255,1); }
 
     /* Footer readout */
@@ -325,7 +325,7 @@
       opacity: 0.95;
     }
     .stage.key .ftr{
-      display:none; /* key-matte hålls ren */
+      display:none; /* keep key matte clean */
     }
 
     .pill{
@@ -433,12 +433,12 @@
       stage.classList.remove("fill","key");
       stage.classList.add(mode);
 
-      // Uppdatera labels
+      // Update labels
       document.getElementById("idNum").textContent = ch;
       document.getElementById("fillLabel").textContent = "Channel " + ch + " FILL";
       document.getElementById("keyLabel").setAttribute("data-text", "Channel " + ch + " KEY");
 
-      // Fill-mode: färgchips synliga. Key-mode: tvinga chips till vit matte.
+      // Fill mode: colour chips visible. Key mode: force chips to white matte.
       if (mode === "key"){
         var chips = document.querySelectorAll(".chip");
         for (var i=0;i<chips.length;i++){
@@ -465,7 +465,7 @@
         var ph = (t * speed) % 2;
         var u = (ph <= 1) ? ph : (2 - ph);
 
-        // bar position inom wrap: 0..82% (bar width 18%)
+        // bar position within wrap: 0..82% (bar width 18%)
         var x = (u * 82);
         if (bar) bar.style.transform = "translateX(" + x + "%)";
 
@@ -475,10 +475,10 @@
       }
       requestAnimationFrame(tick);
 
-      // CasparCG template hooks (om du kör CG ADD/PLAY och vill kunna CG UPDATE senare)
+      // CasparCG template hooks (for CG ADD/PLAY with subsequent CG UPDATE)
       window.update = function(raw){
         try {
-          // Acceptera: {"ch":2,"mode":"fill"} eller "2" eller "mode=key&ch=3"
+          // Accepts: {"ch":2,"mode":"fill"} or "2" or "mode=key&ch=3"
           if (typeof raw !== "string") raw = String(raw || "");
           raw = raw.trim();
 
@@ -491,7 +491,7 @@
           } else if (/^\d+$/.test(raw)){
             next.ch = raw;
           } else {
-            // enkel querystring
+            // simple querystring
             var tmp = raw.replace(/^\?/, "").split("&");
             for (var i=0;i<tmp.length;i++){
               var kv = tmp[i].split("=");
@@ -520,8 +520,8 @@
         } catch(e){}
       };
 
-      window.play = function(){ /* valfritt */ };
-      window.stop = function(){ /* valfritt */ };
+      window.play = function(){ /* optional */ };
+      window.stop = function(){ /* optional */ };
 
     })();
   </script>

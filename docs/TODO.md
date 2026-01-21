@@ -65,7 +65,7 @@ Integrate the `test/key-fill-identifier.html` test pattern into the GUI for one-
 
 - [ ] **Audio Ident System**
   - [ ] Implement Web Speech API ident in test pattern
-  - [ ] British English voice (Google UK English Female, rate 0.9, pitch 0.9)
+  - [ ] Voice synthesis (rate 0.9, pitch 0.9)
   - [ ] Stereo test tones via Web Audio API with `StereoPannerNode`
   - [ ] Timed announcement schedule:
     | Time | Left Channel | Right Channel |
