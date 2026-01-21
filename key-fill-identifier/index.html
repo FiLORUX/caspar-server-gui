@@ -116,6 +116,8 @@
       grid-template-rows: auto 1fr auto;
       grid-template-columns: 1fr 1fr;
       gap: 2vmin;
+      --grid-gap: 2vmin;
+      --right-col: calc((100% - var(--grid-gap)) / 2.4);
     }
 
     /* ═══════════════════════════════════════════════════════════════
@@ -128,9 +130,9 @@
 
     .header {
       grid-column: 1 / -1;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2vmin;
+      display: flex;
+      justify-content: flex-end;
+      gap: var(--grid-gap);
       height: clamp(60px, 10vmin, 100px);
     }
 
@@ -141,6 +143,7 @@
       border-radius: 1.5vmin;
       position: relative;
       overflow: hidden;
+      width: var(--right-col);
     }
 
     /* LEFT BOX: Contains "FILL" label */
@@ -212,7 +215,7 @@
       grid-column: 1 / -1;
       display: grid;
       grid-template-columns: 1.4fr 1fr;
-      gap: 2vmin;
+      gap: var(--grid-gap);
     }
 
     /* ID PANEL - Large channel number */
@@ -533,20 +536,20 @@
 
     .scan-bar {
       position: absolute;
-      top: 10%;
-      bottom: 10%;
+      top: 0;
+      bottom: 0;
       width: 15%;
       background: rgba(255, 255, 255, 0.15);
       border-radius: 1vmin;
-      animation: scan-move 2.5s ease-in-out infinite;
+      animation: scan-move 2s linear infinite;
     }
     .stage.key .scan-bar {
       background: var(--key-white);
     }
 
     @keyframes scan-move {
-      0%, 100% { left: 5%; }
-      50% { left: 80%; }
+      0%, 100% { left: 0%; }
+      50% { left: 85%; }
     }
 
     .scan-bar::before {
@@ -588,6 +591,17 @@
        FOOTER ZONE - Status bar + PAIRED reveal
        ═══════════════════════════════════════════════════════════════ */
 
+    .audio-status-slot {
+      position: absolute;
+      top: 50%;
+      right: 0;
+      width: var(--right-col);
+      transform: translateY(-50%);
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+    }
+
     .footer {
       grid-column: 1 / -1;
       display: grid;
@@ -595,6 +609,7 @@
       gap: 2vmin;
       height: clamp(50px, 8vmin, 80px);
       align-items: center;
+      position: relative;
     }
 
     .status-pill {
@@ -813,7 +828,7 @@
     <div class="corner-marker corner-br"></div>
 
     <!-- Mode badge -->
-    <div class="mode-badge" id="modeBadge">MODE: FILL</div>
+    <!-- <div class="mode-badge" id="modeBadge">MODE: FILL</div> -->
 
     <!-- Main layout -->
     <div class="layout">
@@ -879,6 +894,7 @@
           <span class="paired-text">✓ PAIRED</span>
         </div>
         <div class="status-pill status-right" id="statusRight">1920×1080</div>
+        <div class="audio-status-slot" id="audioStatusSlot"></div>
       </div>
     </div>
 
@@ -930,7 +946,7 @@
       let channelNum = parseInt(params.id || '1', 10);
       if (isNaN(channelNum) || channelNum < 1) channelNum = 1;
       if (channelNum > 16) channelNum = 16;
-      const channelId = String(channelNum).padStart(2, '0');
+      let channelId = String(channelNum).padStart(2, '0');
 
       // Mode: preview (default), fill, or key
       let mode = (params.mode || 'preview').toLowerCase();
@@ -941,6 +957,19 @@
       // ═══════════════════════════════════════════════════════════════
 
       const stage = document.getElementById('stage');
+      const modeBadge = document.getElementById('modeBadge');
+      const modeLabels = {
+        fill: 'Premultiplied Alpha Fill',
+        key: 'Premultiplied Alpha Key',
+        preview: 'Premultiplied Alpha Preview'
+      };
+      let audioState = 'OFF';
+
+      function updateStatusLeft() {
+        const modeLabel = modeLabels[mode] || modeLabels.preview;
+        document.getElementById('statusLeft').textContent =
+          `ID: ${channelId} | Audio: ${audioState} | MODE: ${modeLabel}`;
+      }
       stage.classList.remove('fill', 'key', 'preview');
       stage.classList.add(mode);
 
@@ -948,8 +977,8 @@
       document.getElementById('channelId').textContent = channelId;
       document.getElementById('fillLabel').textContent = `CH ${channelId} › FILL`;
       document.getElementById('keyLabel').textContent = `CH ${channelId} › KEY`;
-      document.getElementById('modeBadge').textContent = `MODE: ${mode.toUpperCase()}`;
-      document.getElementById('statusLeft').textContent = `CH ${channelId} • ${mode.toUpperCase()}`;
+      if (modeBadge) modeBadge.textContent = `MODE: ${mode.toUpperCase()}`;
+      updateStatusLeft();
       document.getElementById('channelMeta').textContent = `FEED IDENT ${numberToWord(channelNum)}`;
 
       // ═══════════════════════════════════════════════════════════════
@@ -984,6 +1013,19 @@
         if (parseInt(label.dataset.pos, 10) === segmentIndex) {
           label.classList.add('active');
         }
+      });
+
+      // Keep scan bar aligned to even/odd seconds (left on even, right on odd)
+      const scanBar = document.querySelector('.scan-bar');
+      function syncScanBar() {
+        if (!scanBar) return;
+        const cycleMs = 2000;
+        const offset = Date.now() % cycleMs;
+        scanBar.style.animationDelay = `-${offset}ms`;
+      }
+      syncScanBar();
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) syncScanBar();
       });
 
       // Radar animation - starts at channel-specific angle
@@ -1065,10 +1107,12 @@
             const newCh = parseInt(parsed.id || parsed.ch || parsed.channel, 10);
             if (!isNaN(newCh) && newCh >= 1 && newCh <= 16) {
               const newId = String(newCh).padStart(2, '0');
+              channelNum = newCh;
+              channelId = newId;
               document.getElementById('channelId').textContent = newId;
               document.getElementById('fillLabel').textContent = `CH ${newId} › FILL`;
               document.getElementById('keyLabel').textContent = `CH ${newId} › KEY`;
-              document.getElementById('statusLeft').textContent = `CH ${newId} • ${mode.toUpperCase()}`;
+              updateStatusLeft();
               document.getElementById('channelMeta').textContent = `FEED IDENT ${numberToWord(newCh)}`;
             }
           }
@@ -1080,7 +1124,8 @@
               mode = newMode;
               stage.classList.remove('fill', 'key', 'preview');
               stage.classList.add(mode);
-              document.getElementById('modeBadge').textContent = `MODE: ${mode.toUpperCase()}`;
+              if (modeBadge) modeBadge.textContent = `MODE: ${mode.toUpperCase()}`;
+              updateStatusLeft();
             }
           }
         } catch (e) {
@@ -1131,8 +1176,10 @@
         // Resolve audio path relative to current document location
         const basePath = new URL('./audio/', window.location.href).href;
         const audioFiles = {
-          left: `${basePath}feed-${feedNum}-left.mp3`,
-          right: `${basePath}feed-${feedNum}-right.mp3`
+          leftLong: `${basePath}feed-${feedNum}-left-long.mp3`,
+          leftShort: `${basePath}feed-${feedNum}-left-short.mp3`,
+          rightLong: `${basePath}feed-${feedNum}-right-long.mp3`,
+          rightShort: `${basePath}feed-${feedNum}-right-short.mp3`
         };
         console.log('Audio files:', audioFiles);
 
@@ -1201,19 +1248,48 @@
           }
 
           const source = audioCtx.createBufferSource();
-          const panner = audioCtx.createStereoPanner();
+          const gain = audioCtx.createGain();
+          const merger = audioCtx.createChannelMerger(2);
 
           source.buffer = buffer;
-          panner.pan.value = pan;
 
-          source.connect(panner);
-          panner.connect(masterGain);
+          const startAt = typeof when === 'number' ? when : audioCtx.currentTime;
+          const duration = buffer.duration || 0;
+          const fade = Math.min(0.05, duration / 2);
+
+          gain.gain.setValueAtTime(0, startAt);
+          gain.gain.linearRampToValueAtTime(1, startAt + fade);
+          gain.gain.setValueAtTime(1, startAt + duration - fade);
+          gain.gain.linearRampToValueAtTime(0, startAt + duration);
+
+          const channelCount = buffer.numberOfChannels || 1;
+          if (channelCount === 1) {
+            const splitter = audioCtx.createChannelSplitter(1);
+            source.connect(splitter);
+            if (pan <= 0) {
+              splitter.connect(merger, 0, 0);
+            } else {
+              splitter.connect(merger, 0, 1);
+            }
+          } else {
+            const splitter = audioCtx.createChannelSplitter(2);
+            source.connect(splitter);
+            if (pan <= 0) {
+              splitter.connect(merger, 0, 0);
+            } else {
+              splitter.connect(merger, 1, 1);
+            }
+          }
+
+          merger.connect(gain);
+          gain.connect(masterGain);
 
           source.onended = () => {
             if (callback) callback();
           };
 
-          source.start(when);
+          source.start(startAt);
+          source.stop(startAt + duration);
         }
 
         // Play identifying tone with stereo panning
@@ -1229,7 +1305,7 @@
           osc.frequency.value = frequency;
 
           // Envelope for smooth start/stop
-          const fade = 0.005;
+          const fade = Math.min(0.05, duration / 2);
           toneGain.gain.setValueAtTime(0, when);
           toneGain.gain.linearRampToValueAtTime(1, when + fade);
           toneGain.gain.setValueAtTime(1, when + duration - fade);
@@ -1258,10 +1334,14 @@
         function scheduleIdentClip(whenT, quarterSecond) {
           const clipStart = whenT + 1; // +1s offset from the quarter boundary
 
-          if (quarterSecond === 0 || quarterSecond === 30) {
-            playBuffer(audioBuffers.left, -1, clipStart);
-          } else if (quarterSecond === 15 || quarterSecond === 45) {
-            playBuffer(audioBuffers.right, 1, clipStart);
+          if (quarterSecond === 0) {
+            playBuffer(audioBuffers.leftLong, -1, clipStart);
+          } else if (quarterSecond === 15) {
+            playBuffer(audioBuffers.leftShort, -1, clipStart);
+          } else if (quarterSecond === 30) {
+            playBuffer(audioBuffers.rightLong, 1, clipStart);
+          } else if (quarterSecond === 45) {
+            playBuffer(audioBuffers.rightShort, 1, clipStart);
           }
         }
 
@@ -1280,6 +1360,11 @@
 
         function scheduleIdentLoop() {
           if (!audioLoaded || !audioCtx) return;
+
+          if (audioState !== 'ON') {
+            audioState = 'ON';
+            updateStatusLeft();
+          }
 
           const nextQuarterMs = getNextQuarterBoundaryMs(5000);
           const nowMs = Date.now();
@@ -1315,7 +1400,15 @@
             letter-spacing: 0.1em;
           `;
           loadingIndicator.textContent = '⏳ LOADING AUDIO...';
-          document.getElementById('stage').appendChild(loadingIndicator);
+          const slot = document.getElementById('audioStatusSlot');
+          if (slot) {
+            loadingIndicator.style.position = 'static';
+            loadingIndicator.style.top = 'auto';
+            loadingIndicator.style.right = 'auto';
+            slot.appendChild(loadingIndicator);
+          } else {
+            document.getElementById('stage').appendChild(loadingIndicator);
+          }
         }
 
         // Show prompt if audio context needs user interaction
@@ -1338,16 +1431,10 @@
             font-family: var(--font-mono);
           `;
           prompt.innerHTML = `
-            <div style="font-size: 3vmin; color: var(--fill-accent); margin-bottom: 2vmin; display:inline-flex; align-items:center; gap:1.2vmin;">
-              <svg style="width:3vmin;height:3vmin;transform:scaleX(-1);" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 12h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                <path d="M12 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
+            <div style="font-size: 3vmin; color: var(--fill-accent); margin-bottom: 2vmin; display:inline-flex; align-items:center; gap:1vmin;">
+              <span style="display:inline-block; transform: scaleX(-1);">🔊</span>
               <span>AUDIO IDENT</span>
-              <svg style="width:3vmin;height:3vmin;" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 12h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                <path d="M12 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
+              <span>🔊</span>
             </div>
             <div style="font-size: 1.8vmin; color: #ffffff; margin-bottom: 2vmin;">
               Click to enable audio identification
@@ -1376,7 +1463,16 @@
           if (loadingIndicator) {
             loadingIndicator.style.background = 'linear-gradient(135deg, rgba(255, 80, 80, 0.9), rgba(200, 50, 50, 0.9))';
             loadingIndicator.textContent = '⚠️ AUDIO FILES NOT FOUND';
+            const slot = document.getElementById('audioStatusSlot');
+            if (slot && loadingIndicator.parentElement !== slot) {
+              loadingIndicator.style.position = 'static';
+              loadingIndicator.style.top = 'auto';
+              loadingIndicator.style.right = 'auto';
+              slot.appendChild(loadingIndicator);
+            }
           }
+          audioState = 'OFF';
+          updateStatusLeft();
         }
 
         // Initialise
