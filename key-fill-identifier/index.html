@@ -824,7 +824,7 @@
       bottom: 0;
       left: 0;
       right: 0;
-      height: clamp(24px, 4vmin, 40px);
+      height: clamp(10px, 1.6vmin, 18px);
       display: flex;
     }
 
@@ -833,17 +833,42 @@
       height: 100%;
     }
 
-    /* EBU colour bar order */
-    .stage.fill .colour-bars span:nth-child(1) { background: #ffffff; }
-    .stage.fill .colour-bars span:nth-child(2) { background: #ffff00; }
-    .stage.fill .colour-bars span:nth-child(3) { background: #00ffff; }
-    .stage.fill .colour-bars span:nth-child(4) { background: #00ff00; }
-    .stage.fill .colour-bars span:nth-child(5) { background: #ff00ff; }
-    .stage.fill .colour-bars span:nth-child(6) { background: #ff0000; }
-    .stage.fill .colour-bars span:nth-child(7) { background: #0000ff; }
+    .greyscale-bars {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: clamp(10px, 1.6vmin, 18px);
+      display: flex;
+    }
+
+    .greyscale-bars span {
+      flex: 1;
+      height: 100%;
+    }
+
+    /* EBU 75% colour bar order */
+    .stage.fill .colour-bars span:nth-child(1) { background: #BFBFBF; }
+    .stage.fill .colour-bars span:nth-child(2) { background: #BFBF00; }
+    .stage.fill .colour-bars span:nth-child(3) { background: #00BFBF; }
+    .stage.fill .colour-bars span:nth-child(4) { background: #00BF00; }
+    .stage.fill .colour-bars span:nth-child(5) { background: #BF00BF; }
+    .stage.fill .colour-bars span:nth-child(6) { background: #BF0000; }
+    .stage.fill .colour-bars span:nth-child(7) { background: #0000BF; }
     .stage.fill .colour-bars span:nth-child(8) { background: #000000; }
 
-    .stage.key .colour-bars span {
+    /* EBU greyscale bar order */
+    .stage.fill .greyscale-bars span:nth-child(1) { background: #E0E0E0; }
+    .stage.fill .greyscale-bars span:nth-child(2) { background: #BFBFBF; }
+    .stage.fill .greyscale-bars span:nth-child(3) { background: #A0A0A0; }
+    .stage.fill .greyscale-bars span:nth-child(4) { background: #808080; }
+    .stage.fill .greyscale-bars span:nth-child(5) { background: #606060; }
+    .stage.fill .greyscale-bars span:nth-child(6) { background: #404040; }
+    .stage.fill .greyscale-bars span:nth-child(7) { background: #202020; }
+    .stage.fill .greyscale-bars span:nth-child(8) { background: #000000; }
+
+    .stage.key .colour-bars span,
+    .stage.key .greyscale-bars span {
       background: var(--key-white);
     }
 
@@ -994,6 +1019,12 @@
 
     <!-- Timecode -->
     <div class="timecode" id="timecode">00:00:00:00</div>
+
+    <!-- Greyscale bars strip -->
+    <div class="greyscale-bars">
+      <span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span>
+    </div>
 
     <!-- Colour bars strip -->
     <div class="colour-bars">
