@@ -731,8 +731,7 @@
       bottom: 0;
       left: 0;
       right: 0;
-      height: 0.8vmin;
-      min-height: 5px;
+      height: clamp(24px, 4vmin, 40px);
       display: flex;
     }
 
@@ -833,7 +832,7 @@
         <div class="id-panel">
           <div class="id-rings"></div>
           <div class="channel-id" id="channelId">01</div>
-          <div class="channel-meta">FEED IDENT</div>
+          <div class="channel-meta" id="channelMeta">FEED IDENT ONE</div>
 
           <!-- Channel fingerprint - unique visual per channel -->
           <div class="fingerprint" id="fingerprint">
@@ -919,6 +918,14 @@
 
       const params = parseParams();
 
+      function numberToWord(num) {
+        const words = [
+          'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT',
+          'NINE', 'TEN', 'ELEVEN', 'TWELVE', 'THIRTEEN', 'FOURTEEN', 'FIFTEEN', 'SIXTEEN'
+        ];
+        return words[num - 1] || 'ONE';
+      }
+
       // Channel ID (1-16, zero-padded)
       let channelNum = parseInt(params.id || '1', 10);
       if (isNaN(channelNum) || channelNum < 1) channelNum = 1;
@@ -943,6 +950,7 @@
       document.getElementById('keyLabel').textContent = `CH ${channelId} › KEY`;
       document.getElementById('modeBadge').textContent = `MODE: ${mode.toUpperCase()}`;
       document.getElementById('statusLeft').textContent = `CH ${channelId} • ${mode.toUpperCase()}`;
+      document.getElementById('channelMeta').textContent = `FEED IDENT ${numberToWord(channelNum)}`;
 
       // ═══════════════════════════════════════════════════════════════
       // CHANNEL FINGERPRINT
@@ -1061,6 +1069,7 @@
               document.getElementById('fillLabel').textContent = `CH ${newId} › FILL`;
               document.getElementById('keyLabel').textContent = `CH ${newId} › KEY`;
               document.getElementById('statusLeft').textContent = `CH ${newId} • ${mode.toUpperCase()}`;
+              document.getElementById('channelMeta').textContent = `FEED IDENT ${numberToWord(newCh)}`;
             }
           }
 
@@ -1099,11 +1108,13 @@
       // ═══════════════════════════════════════════════════════════════
 
       const audioParam = (params.audio || '').toLowerCase();
-      const audioEnabled = audioParam === 'on'
-        ? true
-        : audioParam === 'off'
-          ? false
-          : (mode === 'fill' || mode === 'preview');
+      const audioEnabled = mode === 'key'
+        ? false
+        : audioParam === 'on'
+          ? true
+          : audioParam === 'off'
+            ? false
+            : (mode === 'fill' || mode === 'preview');
 
       if (audioEnabled) {
         // Feed number for announcements (1-8)
@@ -1358,44 +1369,7 @@
           promptEl = prompt;
         }
 
-        // Show ready indicator
-        function showReadyIndicator() {
-          if (loadingIndicator) {
-            loadingIndicator.remove();
-          }
-
-          const audioIndicator = document.createElement('div');
-          audioIndicator.id = 'audioIndicator';
-          audioIndicator.style.cssText = `
-            position: absolute;
-            top: calc(var(--safe-margin) + 1vmin);
-            right: calc(var(--safe-margin) + 1vmin);
-            background: linear-gradient(135deg, rgba(0, 200, 100, 0.9), rgba(0, 150, 80, 0.9));
-            border-radius: 0.8vmin;
-            padding: 0.8vmin 1.5vmin;
-            font-family: var(--font-mono);
-            font-size: clamp(9px, 1.2vmin, 12px);
-            color: #ffffff;
-            letter-spacing: 0.1em;
-            display: flex;
-            align-items: center;
-            gap: 0.8vmin;
-          `;
-          audioIndicator.innerHTML = `
-            <span style="display:inline-block;width:8px;height:8px;background:#fff;border-radius:50%;animation:pulse-dot 1s ease-in-out infinite;"></span>
-            <!-- AUDIO IDENT • FEED ${feedNum} -->
-          `;
-
-          const style = document.createElement('style');
-          style.textContent = `
-            @keyframes pulse-dot {
-              0%, 100% { opacity: 1; transform: scale(1); }
-              50% { opacity: 0.5; transform: scale(0.8); }
-            }
-          `;
-          document.head.appendChild(style);
-          document.getElementById('stage').appendChild(audioIndicator);
-        }
+        // Ready indicator intentionally removed (no on-screen audio badge)
 
         // Show error indicator
         function showErrorIndicator() {
@@ -1409,15 +1383,21 @@
         showLoadingIndicator();
         loadAllAudio().then(success => {
           if (success) {
-            showReadyIndicator();
+            if (loadingIndicator) {
+              loadingIndicator.remove();
+            }
+
+            showAudioPrompt();
             audioCtx.resume().then(() => {
               if (audioCtx.state === 'running') {
+                if (promptEl) {
+                  promptEl.remove();
+                  promptEl = null;
+                }
                 scheduleIdentLoop();
-              } else {
-                showAudioPrompt();
               }
             }).catch(() => {
-              showAudioPrompt();
+              // Keep prompt visible until user interaction.
             });
           } else {
             showErrorIndicator();
