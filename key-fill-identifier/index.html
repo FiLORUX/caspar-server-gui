@@ -833,7 +833,7 @@
         <div class="id-panel">
           <div class="id-rings"></div>
           <div class="channel-id" id="channelId">01</div>
-          <div class="channel-meta">GFX CHANNEL ID</div>
+          <div class="channel-meta">FEED IDENT</div>
 
           <!-- Channel fingerprint - unique visual per channel -->
           <div class="fingerprint" id="fingerprint">
@@ -912,7 +912,8 @@
         const params = new URLSearchParams(search);
         return {
           mode: params.get('mode'),
-          id: params.get('id')
+          id: params.get('id'),
+          audio: params.get('audio')
         };
       }
 
@@ -1097,8 +1098,12 @@
       // See ./audio/README.md for file specifications
       // ═══════════════════════════════════════════════════════════════
 
-      // Audio always enabled in fill mode (it's an ident programme)
-      const audioEnabled = (mode === 'fill');
+      const audioParam = (params.audio || '').toLowerCase();
+      const audioEnabled = audioParam === 'on'
+        ? true
+        : audioParam === 'off'
+          ? false
+          : (mode === 'fill' || mode === 'preview');
 
       if (audioEnabled) {
         // Feed number for announcements (1-8)
@@ -1113,7 +1118,7 @@
 
         // File manifest for this feed
         // Resolve audio path relative to current document location
-        const basePath = new URL('../audio/', window.location.href).href;
+        const basePath = new URL('./audio/', window.location.href).href;
         const audioFiles = {
           left: `${basePath}feed-${feedNum}-left.mp3`,
           right: `${basePath}feed-${feedNum}-right.mp3`
@@ -1174,7 +1179,7 @@
 
         // Play audio buffer with stereo panning
         // pan: -1 = full left, 0 = centre, 1 = full right
-        function playBuffer(buffer, pan, callback) {
+        function playBuffer(buffer, pan, when, callback) {
           if (!buffer || !audioCtx) {
             if (callback) callback();
             return;
@@ -1197,11 +1202,11 @@
             if (callback) callback();
           };
 
-          source.start();
+          source.start(when);
         }
 
         // Play identifying tone with stereo panning
-        function playTone(frequency, duration, pan) {
+        function playTone(frequency, duration, pan, when) {
           if (!audioCtx) return;
           if (audioCtx.state === 'suspended') audioCtx.resume();
 
@@ -1213,10 +1218,11 @@
           osc.frequency.value = frequency;
 
           // Envelope for smooth start/stop
-          toneGain.gain.setValueAtTime(0, audioCtx.currentTime);
-          toneGain.gain.linearRampToValueAtTime(1, audioCtx.currentTime + 0.01);
-          toneGain.gain.setValueAtTime(1, audioCtx.currentTime + duration - 0.01);
-          toneGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + duration);
+          const fade = 0.005;
+          toneGain.gain.setValueAtTime(0, when);
+          toneGain.gain.linearRampToValueAtTime(1, when + fade);
+          toneGain.gain.setValueAtTime(1, when + duration - fade);
+          toneGain.gain.linearRampToValueAtTime(0, when + duration);
 
           panner.pan.value = pan;
 
@@ -1224,71 +1230,62 @@
           toneGain.connect(panner);
           panner.connect(masterGain);
 
-          osc.start();
-          osc.stop(audioCtx.currentTime + duration);
+          osc.start(when);
+          osc.stop(when + duration);
         }
 
-        // Play 3-pip ident pattern
-        function playPips(pan) {
+        function schedulePips(whenT, pan) {
           const freq = 1000;
-          playTone(freq, 0.1, pan);
-          setTimeout(() => playTone(freq, 0.1, pan), 150);
-          setTimeout(() => playTone(freq, 0.3, pan), 300);
+          const shortDur = 0.1;
+          const longDur = 0.5;
+          for (let i = 5; i >= 1; i -= 1) {
+            playTone(freq, shortDur, pan, whenT - i);
+          }
+          playTone(freq, longDur, pan, whenT);
         }
 
-        // Schedule functions — TRUE STEREO (voice only, no tones)
-        function playLeft() {
-          playBuffer(audioBuffers.left, -1);  // LEFT ONLY
-        }
+        function scheduleIdentClip(whenT, quarterSecond) {
+          const clipStart = whenT + 1; // +1s offset from the quarter boundary
 
-        function playRight() {
-          playBuffer(audioBuffers.right, 1);  // RIGHT ONLY
-        }
-
-        function playIntroAndLeft() {
-          playLeft();
-        }
-
-        function triggerIdent() {
-          if (!audioLoaded) return;
-
-          const seconds = new Date().getSeconds();
-
-          // Schedule: LEFT at :00/:30, RIGHT at :15/:45
-          if (seconds >= 0 && seconds < 5) {
-            playLeft();          // :00 — LEFT channel
-          } else if (seconds >= 15 && seconds < 20) {
-            playRight();         // :15 — RIGHT channel
-          } else if (seconds >= 30 && seconds < 35) {
-            playLeft();          // :30 — LEFT channel
-          } else if (seconds >= 45 && seconds < 50) {
-            playRight();         // :45 — RIGHT channel
+          if (quarterSecond === 0 || quarterSecond === 30) {
+            playBuffer(audioBuffers.left, -1, clipStart);
+          } else if (quarterSecond === 15 || quarterSecond === 45) {
+            playBuffer(audioBuffers.right, 1, clipStart);
           }
         }
 
-        function scheduleIdent() {
-          // Calculate time until next quarter minute (:00, :15, :30, :45)
-          const now = new Date();
-          const seconds = now.getSeconds();
-          const ms = now.getMilliseconds();
-
-          const quarters = [0, 15, 30, 45, 60];
-          let nextQuarter = quarters.find(q => q > seconds) || 60;
-          const msUntilNext = ((nextQuarter === 60 ? 60 - seconds : nextQuarter - seconds) * 1000) - ms;
-
-          console.log(`Audio ident: next trigger in ${Math.round(msUntilNext/1000)}s at :${nextQuarter === 60 ? '00' : nextQuarter}`);
-
-          // Schedule first trigger at exact quarter minute
-          setTimeout(() => {
-            triggerIdent();
-            // Then repeat exactly every 15 seconds
-            setInterval(triggerIdent, 15000);
-          }, msUntilNext);
-
-          // Show prompt if browser needs user interaction (no auto-play)
-          if (audioCtx.state === 'suspended') {
-            showAudioPrompt();
+        function getNextQuarterBoundaryMs(minLeadMs) {
+          const nowMs = Date.now();
+          const nowDate = new Date(nowMs);
+          const msIntoMinute = (nowDate.getSeconds() * 1000) + nowDate.getMilliseconds();
+          const quarterMarks = [0, 15000, 30000, 45000, 60000];
+          let nextMsInMinute = quarterMarks.find(q => q - msIntoMinute >= minLeadMs);
+          if (nextMsInMinute === undefined) {
+            nextMsInMinute = 60000;
           }
+          const minuteStartMs = nowMs - msIntoMinute;
+          return minuteStartMs + nextMsInMinute;
+        }
+
+        function scheduleIdentLoop() {
+          if (!audioLoaded || !audioCtx) return;
+
+          const nextQuarterMs = getNextQuarterBoundaryMs(5000);
+          const nowMs = Date.now();
+          const msUntilNext = nextQuarterMs - nowMs;
+          const ctxNow = audioCtx.currentTime;
+          const whenT = ctxNow + (msUntilNext / 1000);
+          const quarterSecond = new Date(nextQuarterMs).getSeconds();
+
+          console.log(`Audio ident: next quarter in ${Math.round(msUntilNext / 1000)}s`);
+
+          // BBC/GTS pips (centre) + ident clip (+1s offset)
+          schedulePips(whenT, 0);
+          scheduleIdentClip(whenT, quarterSecond);
+
+          // Schedule the next batch after this quarter's long pip
+          const nextTickDelay = msUntilNext + 600;
+          setTimeout(scheduleIdentLoop, Math.max(1000, nextTickDelay));
         }
 
         // Show loading indicator
@@ -1311,6 +1308,8 @@
         }
 
         // Show prompt if audio context needs user interaction
+        let promptEl = null;
+
         function showAudioPrompt() {
           const prompt = document.createElement('div');
           prompt.style.cssText = `
@@ -1328,8 +1327,16 @@
             font-family: var(--font-mono);
           `;
           prompt.innerHTML = `
-            <div style="font-size: 3vmin; color: var(--fill-accent); margin-bottom: 2vmin;">
-              🔊 AUDIO IDENT
+            <div style="font-size: 3vmin; color: var(--fill-accent); margin-bottom: 2vmin; display:inline-flex; align-items:center; gap:1.2vmin;">
+              <svg style="width:3vmin;height:3vmin;transform:scaleX(-1);" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 12h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span>AUDIO IDENT</span>
+              <svg style="width:3vmin;height:3vmin;" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 12h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
             </div>
             <div style="font-size: 1.8vmin; color: #ffffff; margin-bottom: 2vmin;">
               Click to enable audio identification
@@ -1342,11 +1349,13 @@
           prompt.addEventListener('click', () => {
             audioCtx.resume().then(() => {
               prompt.remove();
-              playIntroAndLeft();
+              promptEl = null;
+              scheduleIdentLoop();
             });
           });
 
           document.body.appendChild(prompt);
+          promptEl = prompt;
         }
 
         // Show ready indicator
@@ -1374,7 +1383,7 @@
           `;
           audioIndicator.innerHTML = `
             <span style="display:inline-block;width:8px;height:8px;background:#fff;border-radius:50%;animation:pulse-dot 1s ease-in-out infinite;"></span>
-            AUDIO IDENT • FEED ${feedNum}
+            <!-- AUDIO IDENT • FEED ${feedNum} -->
           `;
 
           const style = document.createElement('style');
@@ -1401,7 +1410,15 @@
         loadAllAudio().then(success => {
           if (success) {
             showReadyIndicator();
-            scheduleIdent();
+            audioCtx.resume().then(() => {
+              if (audioCtx.state === 'running') {
+                scheduleIdentLoop();
+              } else {
+                showAudioPrompt();
+              }
+            }).catch(() => {
+              showAudioPrompt();
+            });
           } else {
             showErrorIndicator();
           }
