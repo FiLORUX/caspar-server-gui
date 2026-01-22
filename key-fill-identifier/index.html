@@ -918,9 +918,6 @@
        ═══════════════════════════════════════════════════════════════ */
 
     .timecode {
-      position: absolute;
-      bottom: calc(var(--safe-margin) + 10vmin);
-      right: calc(var(--safe-margin) + 1vmin);
       font-family: var(--font-mono);
       font-size: clamp(11px, 1.6vmin, 16px);
       color: rgba(255, 255, 255, 0.4);
@@ -930,6 +927,13 @@
     .stage.key .timecode {
       color: var(--key-white);
     }
+
+    .timecode-box {
+      position: absolute;
+      bottom: 8%;
+    }
+    .timecode-box.right { right: 6%; }
+    .timecode-box.left { left: 6%; }
   </style>
 </head>
 <body>
@@ -1016,6 +1020,8 @@
           <div class="key-motion">
             <div class="scan-bar"></div>
             <span class="key-motion-label">KEY SYNC</span>
+            <div class="timecode timecode-box right" id="timecode">88:88:88:88</div>
+            <div class="timecode timecode-box left" id="wallclock">88:88:88:88</div>
           </div>
         </div>
       </div>
@@ -1030,9 +1036,6 @@
         <div class="audio-status-slot" id="audioStatusSlot"></div>
       </div>
     </div>
-
-    <!-- Timecode -->
-    <div class="timecode" id="timecode">88:88:88:88</div>
 
     <!-- Greyscale bars strip -->
     <div class="greyscale-bars">
@@ -1189,6 +1192,7 @@
       // ═══════════════════════════════════════════════════════════════
 
       const timecodeEl = document.getElementById('timecode');
+      const wallclockEl = document.getElementById('wallclock');
       const counterStart = Math.ceil(Date.now() / 1000) * 1000;
 
       function formatTimecode(ms) {
@@ -1206,9 +1210,25 @@
         ].join(':');
       }
 
+      function formatWallclock(now) {
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        const seconds = now.getSeconds();
+        const centis = Math.floor(now.getMilliseconds() / 10);
+        return [
+          String(hours).padStart(2, '0'),
+          String(minutes).padStart(2, '0'),
+          String(seconds).padStart(2, '0'),
+          String(centis).padStart(2, '0')
+        ].join(':');
+      }
+
       function updateTimecode() {
         const elapsed = Math.max(0, Date.now() - counterStart);
         timecodeEl.textContent = formatTimecode(elapsed);
+        if (wallclockEl) {
+          wallclockEl.textContent = formatWallclock(new Date());
+        }
       }
 
       // Tick at 50fps aligned to real time
