@@ -1032,7 +1032,7 @@
     </div>
 
     <!-- Timecode -->
-    <div class="timecode" id="timecode">00:00:00:00</div>
+    <div class="timecode" id="timecode">88:88:88:88</div>
 
     <!-- Greyscale bars strip -->
     <div class="greyscale-bars">
@@ -1189,14 +1189,14 @@
       // ═══════════════════════════════════════════════════════════════
 
       const timecodeEl = document.getElementById('timecode');
-      const startTime = performance.now();
+      const counterStart = Math.ceil(Date.now() / 1000) * 1000;
 
       function formatTimecode(ms) {
         const totalSeconds = Math.floor(ms / 1000);
         const hours = Math.floor(totalSeconds / 3600);
         const minutes = Math.floor((totalSeconds % 3600) / 60);
         const seconds = totalSeconds % 60;
-        const frames = Math.floor((ms % 1000) / (1000 / 25)); // 25fps
+        const frames = Math.floor((ms % 1000) / 20); // 50fps
 
         return [
           String(hours).padStart(2, '0'),
@@ -1207,12 +1207,16 @@
       }
 
       function updateTimecode() {
-        const elapsed = performance.now() - startTime;
+        const elapsed = Math.max(0, Date.now() - counterStart);
         timecodeEl.textContent = formatTimecode(elapsed);
-        requestAnimationFrame(updateTimecode);
       }
 
-      requestAnimationFrame(updateTimecode);
+      // Tick at 50fps aligned to real time
+      const msToNextFrame = Math.max(0, 20 - (Date.now() % 20));
+      setTimeout(() => {
+        updateTimecode();
+        setInterval(updateTimecode, 20);
+      }, msToNextFrame);
 
       // ═══════════════════════════════════════════════════════════════
       // CASPARCG TEMPLATE INTERFACE
