@@ -1792,6 +1792,158 @@
           updateStatusLeft();
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // UK PSTN RINGBACK TONE GENERATOR
+        //
+        // Generates the distinctive British "ring ring... ring ring" tone
+        // using Web Audio API oscillators (no external assets).
+        //
+        // TONE: Sum of 400 Hz + 450 Hz sine waves, mixed equally
+        //       (per ITU-T E.180 / BS 6305 / BT specification)
+        //
+        // TRIGGERS: Every minute at exactly xx:21.000 and xx:51.000
+        //           Uses identical timebase logic to pip/MP3 scheduling
+        //
+        // CADENCE: Two "pip-pip" pairs per trigger (total 4.0s):
+        //   ON  0.4s  ─┐
+        //   OFF 0.2s   │ First double-pip
+        //   ON  0.4s  ─┘
+        //   OFF 2.0s     Gap between pairs
+        //   ON  0.4s  ─┐
+        //   OFF 0.2s   │ Second double-pip
+        //   ON  0.4s  ─┘
+        //
+        // TIMING:
+        //   Trigger at xx:21.000 ends at xx:25.000
+        //   Trigger at xx:51.000 ends at xx:55.000
+        //
+        // Outside these windows, output is silent (0 gain).
+        // ═══════════════════════════════════════════════════════════════
+
+        let ringbackLoopRunning = false;
+
+        // Play UK PSTN ringback tone cadence starting at `whenStart` (audioCtx time)
+        // Creates two oscillators (400 Hz + 450 Hz) and schedules gain envelope
+        // for the precise ON/OFF pattern.
+        function playRingbackTone(whenStart) {
+          if (!audioCtx) return;
+          if (audioCtx.state === 'suspended') audioCtx.resume();
+
+          // Two oscillators for the characteristic UK ringback sound
+          const osc400 = audioCtx.createOscillator();
+          const osc450 = audioCtx.createOscillator();
+          const oscGain = audioCtx.createGain();
+
+          osc400.type = 'sine';
+          osc400.frequency.value = 400;
+          osc450.type = 'sine';
+          osc450.frequency.value = 450;
+
+          // Mix both oscillators equally into the gain node
+          osc400.connect(oscGain);
+          osc450.connect(oscGain);
+          oscGain.connect(masterGain);
+
+          // Cadence timings (seconds from whenStart):
+          // ON intervals: [0.0, 0.4], [0.6, 1.0], [3.0, 3.4], [3.6, 4.0]
+          const onIntervals = [
+            { start: 0.0, end: 0.4 },
+            { start: 0.6, end: 1.0 },
+            { start: 3.0, end: 3.4 },
+            { start: 3.6, end: 4.0 }
+          ];
+
+          // Very short fade (2ms) to avoid clicks
+          const fade = 0.002;
+
+          // Start at zero gain (silent)
+          oscGain.gain.setValueAtTime(0, whenStart);
+
+          // Schedule each ON interval with fade in/out
+          for (const interval of onIntervals) {
+            const tOn = whenStart + interval.start;
+            const tOff = whenStart + interval.end;
+
+            // Ensure we're at 0 just before fade-in
+            oscGain.gain.setValueAtTime(0, tOn);
+            // Fade in
+            oscGain.gain.linearRampToValueAtTime(0.5, tOn + fade);
+            // Hold at 0.5 (equal mix of two oscillators = 0.5 each for balanced output)
+            oscGain.gain.setValueAtTime(0.5, tOff - fade);
+            // Fade out
+            oscGain.gain.linearRampToValueAtTime(0, tOff);
+          }
+
+          // Start oscillators and stop after the full 4.0s duration
+          const totalDuration = 4.0;
+          osc400.start(whenStart);
+          osc450.start(whenStart);
+          osc400.stop(whenStart + totalDuration);
+          osc450.stop(whenStart + totalDuration);
+        }
+
+        // Find the next ringback trigger time (xx:21 or xx:51 seconds)
+        // minLeadMs: minimum milliseconds of lead time needed for scheduling
+        // Returns: Unix timestamp (ms) of the next trigger
+        function getNextRingbackTriggerMs(minLeadMs) {
+          const nowMs = Date.now();
+          const nowDate = new Date(nowMs);
+          const secondsIntoMinute = nowDate.getSeconds();
+          const msIntoSecond = nowDate.getMilliseconds();
+          const msIntoMinute = (secondsIntoMinute * 1000) + msIntoSecond;
+
+          // Ringback triggers at 21000ms and 51000ms into each minute
+          const triggerMarks = [21000, 51000, 81000]; // 81000 = next minute's :21
+          const minLead = minLeadMs || 0;
+
+          let nextMsInMinute = triggerMarks.find(t => (t - msIntoMinute) >= minLead);
+
+          if (nextMsInMinute === undefined) {
+            // Wrap to next minute's :21
+            nextMsInMinute = 81000;
+          }
+
+          const minuteStartMs = nowMs - msIntoMinute;
+
+          // Handle wrap-around: if nextMsInMinute >= 60000, it's in the next minute
+          if (nextMsInMinute >= 60000) {
+            return minuteStartMs + nextMsInMinute;
+          }
+
+          return minuteStartMs + nextMsInMinute;
+        }
+
+        // Ringback scheduling loop - runs independently of pip/MP3 loop
+        // Uses identical timebase logic for synchronisation
+        function scheduleRingbackLoop() {
+          if (!audioCtx) return;
+          if (ringbackLoopRunning) return;
+          ringbackLoopRunning = true;
+
+          function tick() {
+            if (!audioCtx) return;
+
+            // Need at least 100ms lead time for scheduling
+            const nextTriggerMs = getNextRingbackTriggerMs(100);
+            const nowMs = Date.now();
+            const msUntilTrigger = nextTriggerMs - nowMs;
+            const ctxNow = audioCtx.currentTime;
+            const whenStart = ctxNow + (msUntilTrigger / 1000);
+            const triggerSecond = new Date(nextTriggerMs).getSeconds();
+
+            console.log(`Ringback: next trigger :${String(triggerSecond).padStart(2, '0')} in ${(msUntilTrigger / 1000).toFixed(1)}s`);
+
+            // Schedule the ringback tone
+            playRingbackTone(whenStart);
+
+            // Schedule next tick after this tone completes (4.0s duration + 500ms buffer)
+            const nextTickDelay = msUntilTrigger + 4500;
+            setTimeout(tick, Math.max(1000, nextTickDelay));
+          }
+
+          tick();
+        }
+
         // Initialise
         showLoadingIndicator();
         loadAllAudio().then(success => {
@@ -1808,6 +1960,7 @@
                   promptEl = null;
                 }
                 scheduleIdentLoop();
+                scheduleRingbackLoop();  // Start ringback alongside ident loop
               }
             }).catch(() => {
               // Keep prompt visible until user interaction.
