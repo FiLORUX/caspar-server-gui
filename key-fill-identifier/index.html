@@ -537,6 +537,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      --label-offset: 9.55%;
     }
     .stage.key .fill-motion {
       /* Solid white = full alpha, so the colourful animation shows in combined */
@@ -584,7 +585,8 @@
 
     .fill-motion-label {
       position: absolute;
-      bottom: 8%;
+      bottom: var(--label-offset);
+      transform: translateY(50%);
       font-family: var(--font-mono);
       font-size: clamp(10px, 1.4vmin, 14px);
       color: rgba(255, 255, 255, 0.4);
@@ -606,6 +608,7 @@
       border-radius: 2vmin;
       position: relative;
       overflow: hidden;
+      --label-offset: 9.55%;
     }
     .stage.key .key-motion {
       /* Key mode: black/transparent, only scanning bar is white */
@@ -615,8 +618,8 @@
 
     .scan-bar {
       position: absolute;
-      top: 0;
-      bottom: 0;
+      top: 19.1%;
+      bottom: 19.1%;
       width: 15%;
       background: rgba(255, 255, 255, 0.15);
       border-radius: 1vmin;
@@ -644,9 +647,9 @@
 
     .key-motion-label {
       position: absolute;
-      bottom: 8%;
+      bottom: var(--label-offset);
       left: 50%;
-      transform: translateX(-50%);
+      transform: translate(-50%, 50%);
       font-family: var(--font-mono);
       font-size: clamp(10px, 1.4vmin, 14px);
       /* Fill mode: very subtle */
@@ -930,7 +933,8 @@
 
     .timecode-box {
       position: absolute;
-      bottom: 8%;
+      bottom: var(--label-offset, 9.55%);
+      transform: translateY(50%);
     }
     .timecode-box.right { right: 6%; }
     .timecode-box.left { left: 6%; }
