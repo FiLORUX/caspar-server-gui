@@ -1861,8 +1861,8 @@
           // Start at zero gain (silent)
           oscGain.gain.setValueAtTime(0, whenStart);
 
-          // Ringback level: -3 dB relative to default (0.5 × 0.708 = 0.354)
-          const ringbackGain = 0.354;
+          // Ringback level: -6 dB relative to default (0.5 × 0.501 = 0.251)
+          const ringbackGain = 0.251;
 
           // Schedule each ON interval with fade in/out
           for (const interval of onIntervals) {
