@@ -1398,18 +1398,25 @@
 
       // ═══════════════════════════════════════════════════════════════
       // AUDIO IDENT SYSTEM — TSG Broadcast Identifier
-      // Pre-rendered WAV files + Web Audio API with TRUE stereo separation
+      // Pre-rendered MP3 files + Web Audio API with TRUE stereo separation
       //
-      // Enable via ?audio=1 parameter
+      // Enable via ?audio=on parameter (default: on for fill/preview/straight)
       //
-      // Schedule (per minute):
-      //   :00 — Intro (both) + left channel ident (LEFT ONLY)
-      //   :15 — Right channel ident (RIGHT ONLY)
-      //   :30 — Left channel short (LEFT ONLY)
-      //   :45 — Right channel short (RIGHT ONLY)
+      // TIMING: Repeats every minute, identical pattern each cycle.
       //
-      // Audio files located in: ./audio/
-      // See ./audio/README.md for file specifications
+      // Pip sequence (at :00, :15, :30, :45 each minute):
+      //   T-3s: LEFT only        — verify left channel present
+      //   T-2s: RIGHT only       — verify right channel present
+      //   T-1s: CENTRE INVERTED  — phase test (cancels when summed to mono)
+      //   T:    CENTRE NORMAL    — reference pip (long, marks the boundary)
+      //
+      // MP3 ident schedule (starts 1s after each boundary):
+      //   :01 → leftLong   (LEFT)  "Feed X, Left Channel"
+      //   :16 → leftShort  (LEFT)  "Left"
+      //   :31 → rightLong  (RIGHT) "Feed X, Right Channel"
+      //   :46 → rightShort (RIGHT) "Right"
+      //
+      // Audio files: ./audio/feed-{1-8}-{left,right}-{long,short}.mp3 (48 kHz mono)
       // ═══════════════════════════════════════════════════════════════
 
       const audioParam = (params.audio || '').toLowerCase();
@@ -1428,7 +1435,6 @@
         // Audio context and buffers
         let audioCtx = null;
         let masterGain = null;
-        let silentNode = null;
         const audioBuffers = {};
         let audioLoaded = false;
         let loadingIndicator = null;
@@ -1496,8 +1502,16 @@
           return audioLoaded;
         }
 
-        // Play audio buffer with stereo panning
-        // pan: -1 = full left, 0 = centre, 1 = full right
+        // Play audio buffer with HARD stereo routing (L-only or R-only)
+        // pan: -1 = LEFT channel only, +1 = RIGHT channel only
+        //
+        // ROUTING ARCHITECTURE:
+        //   source (mono) ──► merger input 0 (L) or input 1 (R)
+        //                              │
+        //                     merger ──► gain (fade envelope) ──► masterGain
+        //
+        // The unconnected merger input produces silence (per Web Audio spec).
+        // This gives TRUE hard-panned output without phase issues.
         function playBuffer(buffer, pan, when, callback) {
           if (!buffer || !audioCtx) {
             if (callback) callback();
@@ -1518,38 +1532,38 @@
           const duration = buffer.duration || 0;
           const fade = Math.min(0.01, duration / 2);
 
+          // Fade envelope: 10ms fade in/out
           gain.gain.setValueAtTime(0, startAt);
           gain.gain.linearRampToValueAtTime(1, startAt + fade);
           gain.gain.setValueAtTime(1, startAt + duration - fade);
           gain.gain.linearRampToValueAtTime(0, startAt + duration);
 
+          // Route mono source directly to L or R merger input
+          // Unconnected input = silence (no silentNode needed)
           const channelCount = buffer.numberOfChannels || 1;
-          if (!silentNode) {
-            silentNode = audioCtx.createGain();
-            silentNode.gain.value = 0;
-          }
+
           if (channelCount === 1) {
-            const splitter = audioCtx.createChannelSplitter(1);
-            source.connect(splitter);
-            silentNode.connect(merger, 0, 0);
-            silentNode.connect(merger, 0, 1);
+            // MONO: Route directly to one channel
+            // source output 0 → merger input 0 (L) or input 1 (R)
             if (pan <= 0) {
-              splitter.connect(merger, 0, 0);
+              source.connect(merger, 0, 0);  // Mono → LEFT only
             } else {
-              splitter.connect(merger, 0, 1);
+              source.connect(merger, 0, 1);  // Mono → RIGHT only
             }
           } else {
+            // STEREO: Extract L or R channel only
             const splitter = audioCtx.createChannelSplitter(2);
             source.connect(splitter);
-            silentNode.connect(merger, 0, 0);
-            silentNode.connect(merger, 0, 1);
             if (pan <= 0) {
+              // Use LEFT channel of stereo file → LEFT output
               splitter.connect(merger, 0, 0);
             } else {
+              // Use RIGHT channel of stereo file → RIGHT output
               splitter.connect(merger, 1, 1);
             }
           }
 
+          // Signal chain: merger → gain (envelope) → masterGain → destination
           merger.connect(gain);
           gain.connect(masterGain);
 
@@ -1561,56 +1575,100 @@
           source.stop(startAt + duration);
         }
 
-        // Play identifying tone with stereo panning
-        function playTone(frequency, duration, pan, when) {
+        // Play identifying tone with stereo panning and optional phase inversion
+        // pan: -1 = full left, 0 = centre, 1 = full right
+        // polarity: 1 = normal, -1 = inverted (for phase verification)
+        //
+        // ROUTING ARCHITECTURE:
+        //   osc ──► toneGain (envelope) ──► polarityGain (±1) ──► panner ──► masterGain
+        //
+        // Phase-inverted centre pips sum to silence when L+R are combined,
+        // providing an audible check that both channels are present and in-phase.
+        function playTone(frequency, duration, pan, when, polarity = 1) {
           if (!audioCtx) return;
           if (audioCtx.state === 'suspended') audioCtx.resume();
 
           const osc = audioCtx.createOscillator();
           const toneGain = audioCtx.createGain();
+          const polarityGain = audioCtx.createGain();
           const panner = audioCtx.createStereoPanner();
 
           osc.type = 'sine';
           osc.frequency.value = frequency;
 
-          // Envelope for smooth start/stop
+          // Envelope for smooth start/stop (2ms fade)
           const fade = Math.min(0.002, duration / 2);
           toneGain.gain.setValueAtTime(0, when);
           toneGain.gain.linearRampToValueAtTime(1, when + fade);
           toneGain.gain.setValueAtTime(1, when + duration - fade);
           toneGain.gain.linearRampToValueAtTime(0, when + duration);
 
+          // Polarity: +1 normal, -1 inverted
+          polarityGain.gain.value = polarity;
+
+          // Stereo position
           panner.pan.value = pan;
 
+          // Signal chain
           osc.connect(toneGain);
-          toneGain.connect(panner);
+          toneGain.connect(polarityGain);
+          polarityGain.connect(panner);
           panner.connect(masterGain);
 
           osc.start(when);
           osc.stop(when + duration);
         }
 
-        function schedulePips(whenT, pan) {
+        // Schedule pip sequence for stereo channel and phase verification
+        // Each session (every 15s) plays 4 pips with different routing:
+        //
+        //   Pip 1 (T-3): LEFT only        — verify left channel
+        //   Pip 2 (T-2): RIGHT only       — verify right channel
+        //   Pip 3 (T-1): CENTRE INVERTED  — phase test (cancels in mono)
+        //   Pip 4 (T):   CENTRE NORMAL    — reference (long pip on quarter)
+        //
+        // Listening test:
+        //   - Pip 1 should only be audible in left speaker/ear
+        //   - Pip 2 should only be audible in right speaker/ear
+        //   - Pip 3 should cancel to silence when summed to mono
+        //   - Pip 4 should be audible in both channels (mono-compatible)
+        function schedulePips(whenT) {
           const freq = 1000;
           const shortDur = 0.1;
           const longDur = 0.5;
-          for (let i = 5; i >= 1; i -= 1) {
-            playTone(freq, shortDur, pan, whenT - i);
-          }
-          playTone(freq, longDur, pan, whenT);
+
+          // Pip 1: LEFT only (T-3)
+          playTone(freq, shortDur, -1, whenT - 3, 1);
+
+          // Pip 2: RIGHT only (T-2)
+          playTone(freq, shortDur, 1, whenT - 2, 1);
+
+          // Pip 3: CENTRE, phase INVERTED (T-1)
+          playTone(freq, shortDur, 0, whenT - 1, -1);
+
+          // Pip 4: CENTRE, phase NORMAL, long pip (T)
+          playTone(freq, longDur, 0, whenT, 1);
         }
 
+        // Schedule MP3 ident clip at T+1s (1 second after the quarter boundary)
+        // This allows the long pip at T to complete before the voice ident starts.
+        //
+        // Pattern: LEFT channel gets both clips first half, RIGHT gets second half
+        //   :00 → leftLong   "Feed X, Left Channel"         (LEFT ONLY)
+        //   :15 → leftShort  "Left"                         (LEFT ONLY)
+        //   :30 → rightLong  "Feed X, Right Channel"        (RIGHT ONLY)
+        //   :45 → rightShort "Right"                        (RIGHT ONLY)
         function scheduleIdentClip(whenT, quarterSecond) {
           const clipStart = whenT + 1; // +1s offset from the quarter boundary
 
           if (quarterSecond === 0) {
-            playBuffer(audioBuffers.leftLong, -1, clipStart);
+            playBuffer(audioBuffers.leftLong, -1, clipStart);   // LEFT
           } else if (quarterSecond === 15) {
-            playBuffer(audioBuffers.leftShort, -1, clipStart);
+            playBuffer(audioBuffers.leftShort, -1, clipStart);  // LEFT
           } else if (quarterSecond === 30) {
-            playBuffer(audioBuffers.rightLong, 1, clipStart);
+            playBuffer(audioBuffers.rightLong, 1, clipStart);   // RIGHT
           } else if (quarterSecond === 45) {
-            playBuffer(audioBuffers.rightShort, 1, clipStart);
+            playBuffer(audioBuffers.rightShort, 1, clipStart);  // RIGHT
           }
         }
 
@@ -1642,10 +1700,10 @@
           const whenT = ctxNow + (msUntilNext / 1000);
           const quarterSecond = new Date(nextQuarterMs).getSeconds();
 
-          console.log(`Audio ident: next quarter in ${Math.round(msUntilNext / 1000)}s`);
+          console.log(`Audio ident: next quarter :${String(quarterSecond).padStart(2, '0')} in ${Math.round(msUntilNext / 1000)}s`);
 
-          // BBC/GTS pips (centre) + ident clip (+1s offset)
-          schedulePips(whenT, 0);
+          // Pips (L → R → inv-centre → centre) + ident clip (+1s offset)
+          schedulePips(whenT);
           scheduleIdentClip(whenT, quarterSecond);
 
           // Schedule the next batch after this quarter's long pip
