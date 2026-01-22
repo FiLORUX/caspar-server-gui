@@ -60,8 +60,10 @@
         linear-gradient(45deg, transparent 75%, #1a1a1a 75%),
         linear-gradient(-45deg, transparent 75%, #1a1a1a 75%),
         #0d0d0d;
-      background-size: 40px 40px;
-      background-position: 0 0, 0 20px, 20px -20px, -20px 0px;
+      background-size: var(--checker-size) var(--checker-size);
+      background-position: 0 0, 0 calc(var(--checker-size) / 2),
+        calc(var(--checker-size) / 2) calc(var(--checker-size) / -2),
+        calc(var(--checker-size) / -2) 0;
     }
 
     .stage {
@@ -71,6 +73,10 @@
       background: transparent;
       font-family: var(--font-display);
       --bar-height: clamp(10px, 1.6vmin, 18px);
+    }
+    .stage.key {
+      /* KEY should look like a key signal: black bg, white matte */
+      background: #000;
     }
 
     /* ═══════════════════════════════════════════════════════════════
@@ -165,6 +171,10 @@
       display: flex;
       padding-left: 0.5vmin;
       flex: 0 0 auto;
+      color: var(--fill-accent);
+    }
+    .stage.key .header-logo {
+      color: var(--key-white);
     }
 
     .header-logo svg {
@@ -186,7 +196,7 @@
       font-size: clamp(10px, 1.7vmin, 18px);
       line-height: 1.4;
       letter-spacing: 0.15em;
-      color: #ffffff;
+      color: rgba(255, 255, 255, 0.9);
       text-transform: uppercase;
       flex: 0 0 auto;
       white-space: nowrap;
@@ -482,7 +492,7 @@
       color: rgba(0, 0, 0, 0.8);
     }
     .stage.key .fingerprint-id {
-      color: rgba(0, 0, 0, 0.9);
+      color: var(--key-white);
     }
 
     /* Segment position labels (N, NE, E, SE, S, SW, W, NW) */
@@ -540,7 +550,7 @@
       --label-offset: 9.55%;
     }
     .stage.key .fill-motion {
-      /* Solid white = full alpha, so the colourful animation shows in combined */
+      /* Key mode: solid white matte */
       background: var(--key-white);
       border: none;
     }
@@ -573,10 +583,31 @@
       animation-duration: 2s;
       border-width: 3px;
     }
+    .arc.key-only {
+      display: none;
+      inset: 5%;
+      animation-duration: 3.2s;
+      animation-direction: reverse;
+      border: 3px solid #000000;
+      border-top-color: #000000;
+      border-right-color: #000000;
+      filter: none;
+    }
     .stage.key .arc {
       border-top-color: var(--key-white);
       border-right-color: var(--key-white);
       filter: none;
+    }
+    .stage.key .arc.key-only {
+      display: block;
+      border-color: #000000;
+      border-top-color: #000000;
+      border-right-color: #000000;
+      background: none;
+    }
+    .stage.fill .arc.key-only,
+    .stage.preview .arc.key-only {
+      display: none;
     }
 
     @keyframes rotate-arc {
@@ -623,7 +654,7 @@
       width: 15%;
       background: rgba(255, 255, 255, 0.15);
       border-radius: 1vmin;
-      animation: scan-move 2s linear infinite;
+      animation: none;
     }
     .stage.key .scan-bar {
       background: var(--key-white);
@@ -963,9 +994,9 @@
           <div class="header-logo" aria-label="TSG logo">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="6478 7030 450 380" role="img" aria-hidden="true">
               <g transform="translate(0, 0)">
-                <path stroke="#69bfff" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round" d="M6488 7305h28c14 0 21 45 28 45s13-45 27-45h28c14 0 21 45 28 45s13-45 27-45h28c14 0 21 45 28 45s13-45 27-45h28m0 90h-28c-14 0-21-45-27-45-7 0-14 45-28 45h-28c-14 0-20-45-27-45s-14 45-28 45h-28c-13 0-20-45-27-45s-14 45-28 45h-28" />
-                <path stroke="#69bfff" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round" d="M6654 7305h28c14 0 21 45 28 45s13-45 27-45h28c14 0 21 45 28 45s13-45 27-45h28c14 0 21 45 27 45s14-45 28-45h28m0 90h-28c-14 0-21-45-28-45s-13 45-27 45h-28c-14 0-21-45-27-45s-14 45-28 45h-28c-14 0-21-45-27-45-7 0-14 45-28 45h-28" />
-                <path fill="#69bfff" d="M6538 7269v-199h-51v-31h144v31h-50v199h-43Zm235-164h-43v-7c0-7-2-14-7-19-5-6-12-9-23-9-6 0-11 1-15 3l-9 6-5 10-1 11 1 11c0 3 1 6 3 8l7 7 14 5 33 10c10 3 17 6 23 10 6 3 11 8 14 13 4 5 6 11 7 17l1 23-3 27c-3 8-7 15-13 21s-13 11-23 14a118 118 0 0 1-65 1c-9-3-17-7-23-12-7-5-12-10-16-17-3-6-5-14-5-21v-13h43v11c0 6 2 11 7 16s13 7 24 7l17-2c4-2 7-4 9-7 3-3 4-7 4-11l1-14-1-15c0-4-1-7-3-9-2-3-5-5-8-6l-13-5-31-10c-19-5-31-13-38-23-6-9-9-21-9-36 0-8 1-16 5-24 3-8 7-15 14-20 5-6 13-10 22-14a104 104 0 0 1 63 0c9 3 16 7 23 12 13 10 20 22 20 35v16Zm13-11c0-10 2-18 7-25 4-7 10-13 17-18a98 98 0 0 1 99 0c6 5 12 11 16 18s7 15 7 25v11h-44v-11c0-8-3-14-8-18-6-4-13-6-21-6s-15 2-21 6-8 10-8 18v121c0 8 2 14 8 18a46 46 0 0 0 42 0c5-4 8-10 8-18v-43h-34v-29h78v72c0 10-3 18-7 25s-10 12-16 17c-7 5-15 8-24 11a98 98 0 0 1-52 0c-9-3-17-6-23-11a46 46 0 0 1-23-42v-121Z"/>
+                <path stroke="currentColor" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round" d="M6488 7305h28c14 0 21 45 28 45s13-45 27-45h28c14 0 21 45 28 45s13-45 27-45h28c14 0 21 45 28 45s13-45 27-45h28m0 90h-28c-14 0-21-45-27-45-7 0-14 45-28 45h-28c-14 0-20-45-27-45s-14 45-28 45h-28c-13 0-20-45-27-45s-14 45-28 45h-28" />
+                <path stroke="currentColor" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round" d="M6654 7305h28c14 0 21 45 28 45s13-45 27-45h28c14 0 21 45 28 45s13-45 27-45h28c14 0 21 45 27 45s14-45 28-45h28m0 90h-28c-14 0-21-45-28-45s-13 45-27 45h-28c-14 0-21-45-27-45s-14 45-28 45h-28c-14 0-21-45-27-45-7 0-14 45-28 45h-28" />
+                <path fill="currentColor" d="M6538 7269v-199h-51v-31h144v31h-50v199h-43Zm235-164h-43v-7c0-7-2-14-7-19-5-6-12-9-23-9-6 0-11 1-15 3l-9 6-5 10-1 11 1 11c0 3 1 6 3 8l7 7 14 5 33 10c10 3 17 6 23 10 6 3 11 8 14 13 4 5 6 11 7 17l1 23-3 27c-3 8-7 15-13 21s-13 11-23 14a118 118 0 0 1-65 1c-9-3-17-7-23-12-7-5-12-10-16-17-3-6-5-14-5-21v-13h43v11c0 6 2 11 7 16s13 7 24 7l17-2c4-2 7-4 9-7 3-3 4-7 4-11l1-14-1-15c0-4-1-7-3-9-2-3-5-5-8-6l-13-5-31-10c-19-5-31-13-38-23-6-9-9-21-9-36 0-8 1-16 5-24 3-8 7-15 14-20 5-6 13-10 22-14a104 104 0 0 1 63 0c9 3 16 7 23 12 13 10 20 22 20 35v16Zm13-11c0-10 2-18 7-25 4-7 10-13 17-18a98 98 0 0 1 99 0c6 5 12 11 16 18s7 15 7 25v11h-44v-11c0-8-3-14-8-18-6-4-13-6-21-6s-15 2-21 6-8 10-8 18v121c0 8 2 14 8 18a46 46 0 0 0 42 0c5-4 8-10 8-18v-43h-34v-29h78v72c0 10-3 18-7 25s-10 12-16 17c-7 5-15 8-24 11a98 98 0 0 1-52 0c-9-3-17-6-23-11a46 46 0 0 1-23-42v-121Z"/>
               </g>
             </svg>
           </div>
@@ -1017,6 +1048,7 @@
               <div class="arc"></div>
               <div class="arc"></div>
               <div class="arc"></div>
+              <div class="arc key-only"></div>
             </div>
             <span class="fill-motion-label">FILL SYNC</span>
           </div>
@@ -1066,6 +1098,7 @@
       //   preview (default) - Combined simulation with checkerboard bg
       //   fill              - RGB output for CasparCG fill channel
       //   key               - Luminance matte for CasparCG key channel
+      //   straight          - Straight alpha (browser default)
       // ═══════════════════════════════════════════════════════════════
 
       function parseParams() {
@@ -1094,9 +1127,9 @@
       if (channelNum > 16) channelNum = 16;
       let channelId = String(channelNum).padStart(2, '0');
 
-      // Mode: preview (default), fill, or key
+      // Mode: preview (default), fill, key, or straight
       let mode = (params.mode || 'preview').toLowerCase();
-      if (!['fill', 'key', 'preview'].includes(mode)) mode = 'preview';
+      if (!['fill', 'key', 'preview', 'straight'].includes(mode)) mode = 'preview';
 
       // ═══════════════════════════════════════════════════════════════
       // APPLY CONFIGURATION
@@ -1107,7 +1140,8 @@
       const modeLabels = {
         fill: 'Premultiplied Alpha Fill',
         key: 'Premultiplied Alpha Key',
-        preview: 'Premultiplied Alpha Preview'
+        preview: 'Premultiplied Alpha Preview',
+        straight: 'Straight Alpha'
       };
       let audioState = 'OFF';
 
@@ -1116,7 +1150,7 @@
         document.getElementById('statusLeft').textContent =
           `ID: ${channelId} | Audio: ${audioState} | MODE: ${modeLabel}`;
       }
-      stage.classList.remove('fill', 'key', 'preview');
+      stage.classList.remove('fill', 'key', 'preview', 'straight');
       stage.classList.add(mode);
 
       // Update text content
@@ -1161,18 +1195,40 @@
         }
       });
 
-      // Keep scan bar aligned to even/odd seconds (left on even, right on odd)
-      const scanBar = document.querySelector('.scan-bar');
-      function syncScanBar() {
-        if (!scanBar) return;
+      // Replace CSS animation with Date.now()-locked scan position
+      function startScanLock() {
+        const keyMotion = document.querySelector('.key-motion');
+        const scanBar = document.querySelector('.scan-bar');
+        if (!keyMotion || !scanBar) return;
+
+        scanBar.style.animation = 'none';
+        scanBar.style.transform = 'translateX(0px)';
+
+        let maxX = 0;
+        function measure() {
+          const boxW = keyMotion.clientWidth;
+          const barW = scanBar.getBoundingClientRect().width;
+          maxX = Math.max(0, boxW - barW);
+        }
+        measure();
+        if (typeof ResizeObserver !== 'undefined') {
+          new ResizeObserver(measure).observe(keyMotion);
+        } else {
+          window.addEventListener('resize', measure);
+        }
+
         const cycleMs = 2000;
-        const offset = Date.now() % cycleMs;
-        scanBar.style.animationDelay = `-${offset}ms`;
+        function tick() {
+          const t = Date.now() % cycleMs;
+          const p = t / cycleMs;
+          const tri = p < 0.5 ? p * 2 : (1 - p) * 2;
+          const x = tri * maxX;
+          scanBar.style.transform = `translateX(${x}px)`;
+          requestAnimationFrame(tick);
+        }
+        tick();
       }
-      syncScanBar();
-      document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) syncScanBar();
-      });
+      startScanLock();
 
       // Radar animation - starts at channel-specific angle
       // This means if fill and key are mismatched, radars will be out of phase!
@@ -1242,6 +1298,15 @@
         setInterval(updateTimecode, 20);
       }, msToNextFrame);
 
+      function updateCheckerSize() {
+        const w = window.innerWidth || 1920;
+        const h = window.innerHeight || 1080;
+        const size = Math.min(w / 64, h / 36);
+        document.documentElement.style.setProperty('--checker-size', `${size}px`);
+      }
+      updateCheckerSize();
+      window.addEventListener('resize', updateCheckerSize);
+
       // ═══════════════════════════════════════════════════════════════
       // CASPARCG TEMPLATE INTERFACE
       // Supports CG UPDATE for runtime changes
@@ -1287,9 +1352,9 @@
           // Update mode
           if (parsed.mode) {
             const newMode = parsed.mode.toLowerCase();
-            if (['fill', 'key', 'preview'].includes(newMode)) {
+            if (['fill', 'key', 'preview', 'straight'].includes(newMode)) {
               mode = newMode;
-              stage.classList.remove('fill', 'key', 'preview');
+              stage.classList.remove('fill', 'key', 'preview', 'straight');
               stage.classList.add(mode);
               if (modeBadge) modeBadge.textContent = `MODE: ${mode.toUpperCase()}`;
               updateStatusLeft();
@@ -1326,7 +1391,7 @@
           ? true
           : audioParam === 'off'
             ? false
-            : (mode === 'fill' || mode === 'preview');
+            : (mode === 'fill' || mode === 'preview' || mode === 'straight');
 
       if (audioEnabled) {
         // Feed number for announcements (1-8)
