@@ -1534,8 +1534,8 @@
           const fade = Math.min(0.01, duration / 2);
 
           // Fade envelope: 10ms fade in/out
-          // MP3 level: +3 dB relative to default (1.0 × 1.413)
-          const mp3Gain = 1.413;
+          // MP3 level: +6 dB relative to default (1.0 × 1.995)
+          const mp3Gain = 1.995;
           gain.gain.setValueAtTime(0, startAt);
           gain.gain.linearRampToValueAtTime(mp3Gain, startAt + fade);
           gain.gain.setValueAtTime(mp3Gain, startAt + duration - fade);
@@ -1827,7 +1827,8 @@
         // Play UK PSTN ringback tone cadence starting at `whenStart` (audioCtx time)
         // Creates two oscillators (400 Hz + 450 Hz) and schedules gain envelope
         // for the precise ON/OFF pattern.
-        function playRingbackTone(whenStart) {
+        // pan: -1 = LEFT only (xx:00-xx:29), +1 = RIGHT only (xx:30-xx:59)
+        function playRingbackTone(whenStart, pan) {
           if (!audioCtx) return;
           if (audioCtx.state === 'suspended') audioCtx.resume();
 
@@ -1835,16 +1836,21 @@
           const osc400 = audioCtx.createOscillator();
           const osc450 = audioCtx.createOscillator();
           const oscGain = audioCtx.createGain();
+          const panner = audioCtx.createStereoPanner();
 
           osc400.type = 'sine';
           osc400.frequency.value = 400;
           osc450.type = 'sine';
           osc450.frequency.value = 450;
 
-          // Mix both oscillators equally into the gain node
+          // Stereo position: LEFT for :21, RIGHT for :51
+          panner.pan.value = pan;
+
+          // Mix both oscillators equally into the gain node, then through panner
           osc400.connect(oscGain);
           osc450.connect(oscGain);
-          oscGain.connect(masterGain);
+          oscGain.connect(panner);
+          panner.connect(masterGain);
 
           // Cadence timings (seconds from whenStart):
           // ON intervals: [0.0, 0.4], [0.6, 1.0], [3.0, 3.4], [3.6, 4.0]
@@ -1936,10 +1942,13 @@
             const whenStart = ctxNow + (msUntilTrigger / 1000);
             const triggerSecond = new Date(nextTriggerMs).getSeconds();
 
-            console.log(`Ringback: next trigger :${String(triggerSecond).padStart(2, '0')} in ${(msUntilTrigger / 1000).toFixed(1)}s`);
+            // Pan: LEFT for :00-:29, RIGHT for :30-:59
+            const pan = triggerSecond < 30 ? -1 : 1;
+            const side = pan < 0 ? 'LEFT' : 'RIGHT';
+            console.log(`Ringback: next trigger :${String(triggerSecond).padStart(2, '0')} (${side}) in ${(msUntilTrigger / 1000).toFixed(1)}s`);
 
-            // Schedule the ringback tone
-            playRingbackTone(whenStart);
+            // Schedule the ringback tone with stereo position
+            playRingbackTone(whenStart, pan);
 
             // Schedule next tick after this tone completes (4.0s duration + 500ms buffer)
             const nextTickDelay = msUntilTrigger + 4500;
