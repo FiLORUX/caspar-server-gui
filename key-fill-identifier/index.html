@@ -74,9 +74,16 @@
       font-family: var(--font-display);
       --bar-height: clamp(10px, 1.6vmin, 18px);
     }
+    html.fill-mode,
+    body.fill-mode {
+      background: #000;
+    }
     .stage.key {
       /* KEY should look like a key signal: black bg, white matte */
       background: #000;
+      --key-ten: #1A1A1A;
+      --key-ninety: #E6E6E6;
+      --key-seventyfive: #BFBFBF;
     }
 
     /* ═══════════════════════════════════════════════════════════════
@@ -91,7 +98,7 @@
       background:
         linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
         linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px);
-      background-size: 40px 40px;
+      background-size: var(--checker-size) var(--checker-size);
       pointer-events: none;
     }
     .stage.key .fill-texture { display: none; }
@@ -221,6 +228,7 @@
       display: inline-flex;
       width: auto;
       align-self: center;
+      transform: scaleY(1.5);
     }
 
     .header-tagline-strong,
@@ -242,7 +250,7 @@
     }
     .stage.key .header-left {
       /* Key mode: solid white = full alpha, so FILL text shows in combined */
-      background: var(--key-white);
+      background: var(--key-ninety);
       border: none;
     }
 
@@ -256,7 +264,7 @@
     }
     .stage.key .fill-label {
       /* In key mode, this text is invisible (same as bg) but position preserved */
-      color: var(--key-white);
+      color: var(--key-ninety);
       text-shadow: none;
     }
 
@@ -271,9 +279,9 @@
       border: 1px solid var(--panel-border);
     }
     .stage.key .header-right {
-      /* Key mode: black background (transparent), text is white matte */
-      background: transparent;
-      border: none;
+      /* Key mode: subtle matte fill */
+      background: var(--key-ten);
+      border: 1px solid var(--key-seventyfive);
     }
 
     .key-label {
@@ -282,7 +290,7 @@
       font-weight: 700;
       letter-spacing: 0.15em;
       /* Fill mode: very subtle, almost invisible */
-      color: rgba(255, 255, 255, 0.1);
+      color: transparent;
     }
     .stage.key .key-label {
       /* Key mode: bright white matte */
@@ -309,7 +317,7 @@
 
     /* ID PANEL - Large channel number */
     .id-panel {
-      background: linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0.85));
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.25));
       border: 1px solid var(--panel-border);
       border-radius: 2vmin;
       display: flex;
@@ -319,8 +327,12 @@
       position: relative;
       overflow: hidden;
     }
+    .stage.fill .id-panel {
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.25));
+      border: 1px solid var(--panel-border);
+    }
     .stage.key .id-panel {
-      background: transparent;
+      background: var(--key-ten);
       border: none;
     }
 
@@ -539,7 +551,7 @@
 
     /* FILL MOTION - Rotating arc (fill-specific animation) */
     .fill-motion {
-      background: linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0.85));
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.25));
       border: 1px solid var(--panel-border);
       border-radius: 2vmin;
       position: relative;
@@ -548,6 +560,10 @@
       align-items: center;
       justify-content: center;
       --label-offset: 9.55%;
+    }
+    .stage.fill .fill-motion {
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.25));
+      border: 1px solid var(--panel-border);
     }
     .stage.key .fill-motion {
       /* Key mode: solid white matte */
@@ -643,8 +659,8 @@
     }
     .stage.key .key-motion {
       /* Key mode: black/transparent, only scanning bar is white */
-      background: transparent;
-      border: none;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid var(--key-seventyfive);
     }
 
     .scan-bar {
@@ -737,8 +753,8 @@
     }
     .stage.key .status-pill {
       /* Solid white so any text shows in combined */
-      background: var(--key-white);
-      border: none;
+      background: var(--key-ninety);
+      border: 1px solid var(--key-seventyfive);
       color: var(--key-white);
     }
     .stage.preview .status-pill {
@@ -778,9 +794,9 @@
       border: 1px solid var(--panel-border);
     }
     .stage.key .paired-reveal {
-      /* Key mode: transparent background, only text is white */
-      background: transparent;
-      border: none;
+      /* Key mode: subtle matte fill */
+      background: var(--key-ten);
+      border: 1px solid var(--key-seventyfive);
       animation: none;
     }
 
@@ -1007,10 +1023,10 @@
           </div>
         </div>
         <div class="header-box header-left">
-          <span class="fill-label" id="fillLabel">CH 01 › FILL</span>
+          <span class="fill-label" id="fillLabel">ID 01 › FILL</span>
         </div>
         <div class="header-box header-right">
-          <span class="key-label" id="keyLabel">CH 01 › KEY</span>
+          <span class="key-label" id="keyLabel">ID 01 › KEY</span>
         </div>
       </div>
 
@@ -1138,9 +1154,9 @@
       const stage = document.getElementById('stage');
       const modeBadge = document.getElementById('modeBadge');
       const modeLabels = {
-        fill: 'Premultiplied Alpha Fill',
-        key: 'Premultiplied Alpha Key',
-        preview: 'Premultiplied Alpha Preview',
+        fill: 'Premultiplied Alpha',
+        key: 'Premultiplied Alpha',
+        preview: 'Premultiplied Alpha Superimposed Preview',
         straight: 'Straight Alpha'
       };
       let audioState = 'OFF';
@@ -1148,15 +1164,21 @@
       function updateStatusLeft() {
         const modeLabel = modeLabels[mode] || modeLabels.preview;
         document.getElementById('statusLeft').textContent =
-          `ID: ${channelId} | Audio: ${audioState} | MODE: ${modeLabel}`;
+          `ID: ${channelId} | Audio: ${audioState} | Mode: ${modeLabel}`;
       }
       stage.classList.remove('fill', 'key', 'preview', 'straight');
       stage.classList.add(mode);
+      document.body.classList.remove('fill-mode');
+      document.documentElement.classList.remove('fill-mode');
+      if (mode === 'fill') {
+        document.body.classList.add('fill-mode');
+        document.documentElement.classList.add('fill-mode');
+      }
 
       // Update text content
       document.getElementById('channelId').textContent = channelId;
-      document.getElementById('fillLabel').textContent = `CH ${channelId} › FILL`;
-      document.getElementById('keyLabel').textContent = `CH ${channelId} › KEY`;
+      document.getElementById('fillLabel').textContent = `ID ${channelId} › FILL`;
+      document.getElementById('keyLabel').textContent = `ID ${channelId} › KEY`;
       if (modeBadge) modeBadge.textContent = `MODE: ${mode.toUpperCase()}`;
       updateStatusLeft();
       document.getElementById('channelMeta').textContent = `FEED IDENT ${numberToWord(channelNum)}`;
@@ -1342,8 +1364,8 @@
               channelNum = newCh;
               channelId = newId;
               document.getElementById('channelId').textContent = newId;
-              document.getElementById('fillLabel').textContent = `CH ${newId} › FILL`;
-              document.getElementById('keyLabel').textContent = `CH ${newId} › KEY`;
+              document.getElementById('fillLabel').textContent = `ID ${newId} › FILL`;
+              document.getElementById('keyLabel').textContent = `ID ${newId} › KEY`;
               updateStatusLeft();
               document.getElementById('channelMeta').textContent = `FEED IDENT ${numberToWord(newCh)}`;
             }
@@ -1356,6 +1378,12 @@
               mode = newMode;
               stage.classList.remove('fill', 'key', 'preview', 'straight');
               stage.classList.add(mode);
+              document.body.classList.remove('fill-mode');
+              document.documentElement.classList.remove('fill-mode');
+              if (mode === 'fill') {
+                document.body.classList.add('fill-mode');
+                document.documentElement.classList.add('fill-mode');
+              }
               if (modeBadge) modeBadge.textContent = `MODE: ${mode.toUpperCase()}`;
               updateStatusLeft();
             }
@@ -1400,6 +1428,7 @@
         // Audio context and buffers
         let audioCtx = null;
         let masterGain = null;
+        let silentNode = null;
         const audioBuffers = {};
         let audioLoaded = false;
         let loadingIndicator = null;
@@ -1495,9 +1524,15 @@
           gain.gain.linearRampToValueAtTime(0, startAt + duration);
 
           const channelCount = buffer.numberOfChannels || 1;
+          if (!silentNode) {
+            silentNode = audioCtx.createGain();
+            silentNode.gain.value = 0;
+          }
           if (channelCount === 1) {
             const splitter = audioCtx.createChannelSplitter(1);
             source.connect(splitter);
+            silentNode.connect(merger, 0, 0);
+            silentNode.connect(merger, 0, 1);
             if (pan <= 0) {
               splitter.connect(merger, 0, 0);
             } else {
@@ -1506,6 +1541,8 @@
           } else {
             const splitter = audioCtx.createChannelSplitter(2);
             source.connect(splitter);
+            silentNode.connect(merger, 0, 0);
+            silentNode.connect(merger, 0, 1);
             if (pan <= 0) {
               splitter.connect(merger, 0, 0);
             } else {
@@ -1537,7 +1574,7 @@
           osc.frequency.value = frequency;
 
           // Envelope for smooth start/stop
-          const fade = Math.min(0.05, duration / 2);
+          const fade = Math.min(0.002, duration / 2);
           toneGain.gain.setValueAtTime(0, when);
           toneGain.gain.linearRampToValueAtTime(1, when + fade);
           toneGain.gain.setValueAtTime(1, when + duration - fade);
