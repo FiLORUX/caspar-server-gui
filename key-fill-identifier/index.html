@@ -1534,9 +1534,11 @@
           const fade = Math.min(0.01, duration / 2);
 
           // Fade envelope: 10ms fade in/out
+          // MP3 level: +3 dB relative to default (1.0 × 1.413)
+          const mp3Gain = 1.413;
           gain.gain.setValueAtTime(0, startAt);
-          gain.gain.linearRampToValueAtTime(1, startAt + fade);
-          gain.gain.setValueAtTime(1, startAt + duration - fade);
+          gain.gain.linearRampToValueAtTime(mp3Gain, startAt + fade);
+          gain.gain.setValueAtTime(mp3Gain, startAt + duration - fade);
           gain.gain.linearRampToValueAtTime(0, startAt + duration);
 
           // Simple signal chain: source → gain → panner → master
@@ -1859,6 +1861,9 @@
           // Start at zero gain (silent)
           oscGain.gain.setValueAtTime(0, whenStart);
 
+          // Ringback level: -3 dB relative to default (0.5 × 0.708 = 0.354)
+          const ringbackGain = 0.354;
+
           // Schedule each ON interval with fade in/out
           for (const interval of onIntervals) {
             const tOn = whenStart + interval.start;
@@ -1867,9 +1872,9 @@
             // Ensure we're at 0 just before fade-in
             oscGain.gain.setValueAtTime(0, tOn);
             // Fade in
-            oscGain.gain.linearRampToValueAtTime(0.5, tOn + fade);
-            // Hold at 0.5 (equal mix of two oscillators = 0.5 each for balanced output)
-            oscGain.gain.setValueAtTime(0.5, tOff - fade);
+            oscGain.gain.linearRampToValueAtTime(ringbackGain, tOn + fade);
+            // Hold
+            oscGain.gain.setValueAtTime(ringbackGain, tOff - fade);
             // Fade out
             oscGain.gain.linearRampToValueAtTime(0, tOff);
           }
