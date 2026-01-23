@@ -1276,7 +1276,12 @@
       function updateStatusLeft() {
         const modeLabel = modeLabels[mode] || modeLabels.preview;
         document.getElementById('statusLeft').textContent =
-          `ID: ${channelId} | Audio: ${audioState} | Mode: ${modeLabel}`;
+          `ID: ${channelId} | Mode: ${modeLabel}`;
+      }
+
+      function updateStatusRight() {
+        document.getElementById('statusRight').textContent =
+          `Technical format: HD 1080p/50 | 2×PCM 48 kHz | Audio: ${audioState}`;
       }
       stage.classList.remove('fill', 'key', 'preview', 'straight');
       stage.classList.add(mode);
@@ -1293,6 +1298,7 @@
       document.getElementById('keyLabel').textContent = `ID ${channelId} › KEY`;
       if (modeBadge) modeBadge.textContent = `MODE: ${mode.toUpperCase()}`;
       updateStatusLeft();
+      updateStatusRight();
       document.getElementById('channelMeta').textContent = `FEED IDENT ${numberToWord(channelNum)}`;
 
       // ═══════════════════════════════════════════════════════════════
@@ -1858,7 +1864,7 @@
 
             if (audioState !== 'ON') {
               audioState = 'ON';
-              updateStatusLeft();
+              updateStatusRight();
             }
 
             const nextQuarterMs = getNextQuarterBoundaryMs(6000);  // 6s lead time for 5 pips
@@ -1975,7 +1981,7 @@
             }
           }
           audioState = 'OFF';
-          updateStatusLeft();
+          updateStatusRight();
         }
 
         // ═══════════════════════════════════════════════════════════════
