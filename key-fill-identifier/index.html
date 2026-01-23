@@ -1204,29 +1204,59 @@
       // Reload page at each minute boundary to update all components
       // ═══════════════════════════════════════════════════════════════
 
-      if (isAutoMode) {
-        function scheduleMinuteReload() {
-          const now = new Date();
-          const secondsIntoMinute = now.getSeconds() + (now.getMilliseconds() / 1000);
-          // Reload at xx:59.500 to give page time to initialise before next minute's audio
-          const targetSecond = 59.5;
-          let msUntilReload;
+      // Auto-cycling UI update function (called at minute boundaries)
+      // Updates all visual elements without page reload
+      function updateChannelDisplay(newChannelNum) {
+        channelNum = newChannelNum;
+        channelId = String(channelNum).padStart(2, '0');
 
-          if (secondsIntoMinute < targetSecond) {
-            // Target is later this minute
-            msUntilReload = (targetSecond - secondsIntoMinute) * 1000;
-          } else {
-            // Target is next minute's :59.5 (almost 60s away)
-            msUntilReload = (60 - secondsIntoMinute + targetSecond) * 1000;
-          }
+        // Update text elements
+        document.getElementById('channelId').textContent = channelId;
+        document.getElementById('fillLabel').textContent = `ID ${channelId} › FILL`;
+        document.getElementById('keyLabel').textContent = `ID ${channelId} › KEY`;
+        document.getElementById('channelMeta').textContent = `FEED IDENT ${numberToWord(channelNum)}`;
 
-          setTimeout(() => {
-            window.location.reload();
-          }, msUntilReload);
+        // Update fingerprint
+        const newSegmentIndex = ((channelNum - 1) % 8) + 1;
+        document.getElementById('fingerprintId').textContent = newSegmentIndex;
+
+        // Update segment highlights
+        document.querySelectorAll('.fingerprint-segment').forEach((seg, i) => {
+          seg.classList.toggle('active', (i + 1) === newSegmentIndex);
+        });
+
+        // Update label highlights
+        document.querySelectorAll('.fingerprint-label').forEach(label => {
+          label.classList.toggle('active', parseInt(label.dataset.pos, 10) === newSegmentIndex);
+        });
+
+        // Update URL
+        updateUrl();
+        updateStatusLeft();
+
+        // Notify audio system of feed change (if registered)
+        if (window._updateAudioFeed) {
+          window._updateAudioFeed(newSegmentIndex);
         }
 
-        scheduleMinuteReload();
-        console.log(`Auto-cycling mode: ID ${channelId}, reload at xx:59.5`);
+        console.log(`Auto-cycle: switched to ID ${channelId} (Feed ${newSegmentIndex})`);
+      }
+
+      // Schedule minute-boundary updates for auto-mode (no page reload)
+      if (isAutoMode) {
+        function scheduleMinuteUpdate() {
+          const now = new Date();
+          const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+
+          setTimeout(() => {
+            const newId = getIdFromMinute();
+            updateChannelDisplay(newId);
+            scheduleMinuteUpdate(); // Schedule next update
+          }, msUntilNextMinute + 10); // +10ms to ensure we're in new minute
+        }
+
+        scheduleMinuteUpdate();
+        console.log(`Auto-cycling mode: ID ${channelId}, updates at minute boundaries`);
       }
 
       // ═══════════════════════════════════════════════════════════════
@@ -1512,27 +1542,43 @@
             : (mode === 'fill' || mode === 'preview' || mode === 'straight');
 
       if (audioEnabled) {
-        // Feed number for announcements (1-8)
-        const feedNum = ((channelNum - 1) % 8) + 1;
+        // Feed number for announcements (1-8) - dynamic in auto-mode
+        let currentFeedNum = ((channelNum - 1) % 8) + 1;
+
+        // Register callback for auto-mode feed updates
+        if (isAutoMode) {
+          window._updateAudioFeed = function(newFeedNum) {
+            currentFeedNum = newFeedNum;
+            console.log(`Audio: switched to feed ${currentFeedNum}`);
+          };
+        }
 
         // Audio context and buffers
         let audioCtx = null;
         let masterGain = null;
-        const audioBuffers = {};
+        // In auto-mode: audioBuffers[feedNum] = {leftLong, leftShort, rightLong, rightShort}
+        // In fixed mode: audioBuffers = {leftLong, leftShort, rightLong, rightShort}
+        const audioBuffers = isAutoMode ? {} : {};
         let audioLoaded = false;
         let loadingIndicator = null;
         let loopRunning = false;  // Prevent double loop scheduling
 
-        // File manifest for this feed
         // Resolve audio path relative to current document location
         const basePath = new URL('./audio/', window.location.href).href;
-        const audioFiles = {
-          leftLong: `${basePath}feed-${feedNum}-left-long.mp3`,
-          leftShort: `${basePath}feed-${feedNum}-left-short.mp3`,
-          rightLong: `${basePath}feed-${feedNum}-right-long.mp3`,
-          rightShort: `${basePath}feed-${feedNum}-right-short.mp3`
-        };
-        console.log('Audio files:', audioFiles);
+
+        // Build file manifest
+        function getAudioFilesForFeed(feedNum) {
+          return {
+            leftLong: `${basePath}feed-${feedNum}-left-long.mp3`,
+            leftShort: `${basePath}feed-${feedNum}-left-short.mp3`,
+            rightLong: `${basePath}feed-${feedNum}-right-long.mp3`,
+            rightShort: `${basePath}feed-${feedNum}-right-short.mp3`
+          };
+        }
+
+        // In auto-mode, load all 8 feeds; otherwise just current feed
+        const feedsToLoad = isAutoMode ? [1, 2, 3, 4, 5, 6, 7, 8] : [currentFeedNum];
+        console.log('Loading audio for feeds:', feedsToLoad);
 
         // Initialise audio context
         function initAudio() {
@@ -1564,24 +1610,37 @@
           }
         }
 
-        // Load all audio files
+        // Load all audio files for all required feeds
         async function loadAllAudio() {
           await initAudio();
 
-          const loadPromises = Object.entries(audioFiles).map(async ([key, url]) => {
-            const buffer = await loadAudioFile(url);
-            if (buffer) {
-              audioBuffers[key] = buffer;
+          let totalLoaded = 0;
+          let totalFiles = 0;
+
+          for (const feedNum of feedsToLoad) {
+            const files = getAudioFilesForFeed(feedNum);
+            if (isAutoMode) {
+              audioBuffers[feedNum] = {};
             }
-          });
 
-          await Promise.all(loadPromises);
+            const loadPromises = Object.entries(files).map(async ([key, url]) => {
+              totalFiles++;
+              const buffer = await loadAudioFile(url);
+              if (buffer) {
+                if (isAutoMode) {
+                  audioBuffers[feedNum][key] = buffer;
+                } else {
+                  audioBuffers[key] = buffer;
+                }
+                totalLoaded++;
+              }
+            });
 
-          const loadedCount = Object.keys(audioBuffers).length;
-          const totalCount = Object.keys(audioFiles).length;
+            await Promise.all(loadPromises);
+          }
 
-          console.log(`Audio loaded: ${loadedCount}/${totalCount} files`);
-          audioLoaded = loadedCount > 0;
+          console.log(`Audio loaded: ${totalLoaded}/${totalFiles} files for ${feedsToLoad.length} feed(s)`);
+          audioLoaded = totalLoaded > 0;
 
           return audioLoaded;
         }
@@ -1757,14 +1816,21 @@
         function scheduleIdentClip(whenT, quarterSecond) {
           const clipStart = whenT + 1; // +1s offset from the quarter boundary
 
+          // Get buffers for current feed (auto-mode uses nested structure)
+          const buffers = isAutoMode ? audioBuffers[currentFeedNum] : audioBuffers;
+          if (!buffers) {
+            console.warn(`No audio buffers for feed ${currentFeedNum}`);
+            return;
+          }
+
           if (quarterSecond === 0) {
-            playBuffer(audioBuffers.leftLong, -1, clipStart);   // LEFT
+            playBuffer(buffers.leftLong, -1, clipStart);   // LEFT
           } else if (quarterSecond === 15) {
-            playBuffer(audioBuffers.leftShort, -1, clipStart);  // LEFT
+            playBuffer(buffers.leftShort, -1, clipStart);  // LEFT
           } else if (quarterSecond === 30) {
-            playBuffer(audioBuffers.rightLong, 1, clipStart);   // RIGHT
+            playBuffer(buffers.rightLong, 1, clipStart);   // RIGHT
           } else if (quarterSecond === 45) {
-            playBuffer(audioBuffers.rightShort, 1, clipStart);  // RIGHT
+            playBuffer(buffers.rightShort, 1, clipStart);  // RIGHT
           }
         }
 
