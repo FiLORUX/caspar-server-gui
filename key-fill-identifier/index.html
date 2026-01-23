@@ -1137,8 +1137,20 @@
         return words[num - 1] || 'ONE';
       }
 
+      // Check if ID was explicitly provided in URL (not 'auto')
+      const idExplicitlySet = params.id !== null && params.id.toLowerCase() !== 'auto';
+
+      // Calculate ID from current minute (cycles 1-8)
+      function getIdFromMinute() {
+        const minute = new Date().getMinutes();
+        return (minute % 8) + 1;
+      }
+
       // Channel ID (1-16, zero-padded)
-      let channelNum = parseInt(params.id || '1', 10);
+      // If no ID specified, use minute-based cycling (1-8)
+      let channelNum = idExplicitlySet
+        ? parseInt(params.id, 10)
+        : getIdFromMinute();
       if (isNaN(channelNum) || channelNum < 1) channelNum = 1;
       if (channelNum > 16) channelNum = 16;
       let channelId = String(channelNum).padStart(2, '0');
@@ -1151,25 +1163,52 @@
       // URL NORMALISATION
       // Always display explicit parameters for clarity
       // Format: ?mode=preview&id=01&audio=on
+      // For auto-cycling mode (no id param), shows: ?mode=preview&id=auto&audio=on
       // ═══════════════════════════════════════════════════════════════
 
-      (function normaliseUrl() {
+      function getEffectiveAudio() {
         const audioParam = (params.audio || '').toLowerCase();
-        // Determine effective audio state for URL
-        const effectiveAudio = mode === 'key'
+        return mode === 'key'
           ? 'off'
           : audioParam === 'on'
             ? 'on'
             : audioParam === 'off'
               ? 'off'
               : (mode === 'fill' || mode === 'preview' || mode === 'straight') ? 'on' : 'off';
+      }
 
-        const canonicalUrl = `${window.location.pathname}?mode=${mode}&id=${channelId}&audio=${effectiveAudio}`;
-
-        if (window.location.search !== `?mode=${mode}&id=${channelId}&audio=${effectiveAudio}`) {
+      function updateUrl() {
+        const effectiveAudio = getEffectiveAudio();
+        const idParam = idExplicitlySet ? channelId : 'auto';
+        const canonicalUrl = `${window.location.pathname}?mode=${mode}&id=${idParam}&audio=${effectiveAudio}`;
+        if (window.location.search !== `?mode=${mode}&id=${idParam}&audio=${effectiveAudio}`) {
           window.history.replaceState(null, '', canonicalUrl);
         }
-      })();
+      }
+
+      // Initial URL normalisation
+      updateUrl();
+
+      // ═══════════════════════════════════════════════════════════════
+      // AUTO-CYCLING MODE
+      // When no ID is specified, cycle through 1-8 based on minute
+      // Reload page at each minute boundary to update all components
+      // ═══════════════════════════════════════════════════════════════
+
+      if (!idExplicitlySet) {
+        function scheduleMinuteReload() {
+          const now = new Date();
+          const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+
+          setTimeout(() => {
+            // Reload to pick up new minute-based ID
+            window.location.reload();
+          }, msUntilNextMinute + 50); // +50ms buffer to ensure we're in the new minute
+        }
+
+        scheduleMinuteReload();
+        console.log(`Auto-cycling mode: ID ${channelId}, next change in ${Math.ceil((60 - new Date().getSeconds()))}s`);
+      }
 
       // ═══════════════════════════════════════════════════════════════
       // APPLY CONFIGURATION
