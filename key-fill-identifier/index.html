@@ -1148,6 +1148,30 @@
       if (!['fill', 'key', 'preview', 'straight'].includes(mode)) mode = 'preview';
 
       // ═══════════════════════════════════════════════════════════════
+      // URL NORMALISATION
+      // Always display explicit parameters for clarity
+      // Format: ?mode=preview&id=01&audio=on
+      // ═══════════════════════════════════════════════════════════════
+
+      (function normaliseUrl() {
+        const audioParam = (params.audio || '').toLowerCase();
+        // Determine effective audio state for URL
+        const effectiveAudio = mode === 'key'
+          ? 'off'
+          : audioParam === 'on'
+            ? 'on'
+            : audioParam === 'off'
+              ? 'off'
+              : (mode === 'fill' || mode === 'preview' || mode === 'straight') ? 'on' : 'off';
+
+        const canonicalUrl = `${window.location.pathname}?mode=${mode}&id=${channelId}&audio=${effectiveAudio}`;
+
+        if (window.location.search !== `?mode=${mode}&id=${channelId}&audio=${effectiveAudio}`) {
+          window.history.replaceState(null, '', canonicalUrl);
+        }
+      })();
+
+      // ═══════════════════════════════════════════════════════════════
       // APPLY CONFIGURATION
       // ═══════════════════════════════════════════════════════════════
 
