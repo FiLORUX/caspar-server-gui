@@ -1534,8 +1534,8 @@
           const fade = Math.min(0.01, duration / 2);
 
           // Fade envelope: 10ms fade in/out
-          // MP3 level: +6 dB relative to default (1.0 × 1.995)
-          const mp3Gain = 1.995;
+          // MP3 level: +9 dB relative to default (1.0 × 2.818)
+          const mp3Gain = 2.818;
           gain.gain.setValueAtTime(0, startAt);
           gain.gain.linearRampToValueAtTime(mp3Gain, startAt + fade);
           gain.gain.setValueAtTime(mp3Gain, startAt + duration - fade);
