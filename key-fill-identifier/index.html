@@ -1575,11 +1575,15 @@
           osc.type = 'sine';
           osc.frequency.value = frequency;
 
+          // Compensate for StereoPanner equal-power panning loss at centre
+          // pan=0 causes -3 dB per channel, so we boost by +3 dB (×1.414) to maintain -18 dBFS
+          const centreCompensation = (pan === 0) ? 1.414 : 1.0;
+
           // Envelope for smooth start/stop (2ms fade)
           const fade = Math.min(0.002, duration / 2);
           toneGain.gain.setValueAtTime(0, when);
-          toneGain.gain.linearRampToValueAtTime(1, when + fade);
-          toneGain.gain.setValueAtTime(1, when + duration - fade);
+          toneGain.gain.linearRampToValueAtTime(centreCompensation, when + fade);
+          toneGain.gain.setValueAtTime(centreCompensation, when + duration - fade);
           toneGain.gain.linearRampToValueAtTime(0, when + duration);
 
           // Polarity: +1 normal, -1 inverted
