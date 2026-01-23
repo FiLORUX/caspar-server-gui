@@ -1123,7 +1123,8 @@
         return {
           mode: params.get('mode'),
           id: params.get('id'),
-          audio: params.get('audio')
+          audio: params.get('audio'),
+          auto: params.has('auto')
         };
       }
 
@@ -1137,8 +1138,9 @@
         return words[num - 1] || 'ONE';
       }
 
-      // Check if ID was explicitly provided in URL (not 'auto')
-      const idExplicitlySet = params.id !== null && params.id.toLowerCase() !== 'auto';
+      // Check if ID was explicitly provided in URL (not 'auto' and no &auto flag)
+      const isAutoMode = params.auto || params.id === null || (params.id && params.id.toLowerCase() === 'auto');
+      const idExplicitlySet = !isAutoMode;
 
       // Calculate ID from current minute (cycles 1-8)
       function getIdFromMinute() {
@@ -1179,9 +1181,10 @@
 
       function updateUrl() {
         const effectiveAudio = getEffectiveAudio();
-        const idParam = idExplicitlySet ? channelId : 'auto';
-        const canonicalUrl = `${window.location.pathname}?mode=${mode}&id=${idParam}&audio=${effectiveAudio}`;
-        if (window.location.search !== `?mode=${mode}&id=${idParam}&audio=${effectiveAudio}`) {
+        const autoFlag = isAutoMode ? '&auto' : '';
+        const canonicalUrl = `${window.location.pathname}?mode=${mode}&id=${channelId}&audio=${effectiveAudio}${autoFlag}`;
+        const expectedSearch = `?mode=${mode}&id=${channelId}&audio=${effectiveAudio}${autoFlag}`;
+        if (window.location.search !== expectedSearch) {
           window.history.replaceState(null, '', canonicalUrl);
         }
       }
@@ -1195,7 +1198,7 @@
       // Reload page at each minute boundary to update all components
       // ═══════════════════════════════════════════════════════════════
 
-      if (!idExplicitlySet) {
+      if (isAutoMode) {
         function scheduleMinuteReload() {
           const now = new Date();
           const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
