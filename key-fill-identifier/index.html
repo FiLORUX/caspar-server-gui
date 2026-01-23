@@ -1556,47 +1556,73 @@
 
         // Play identifying tone with stereo panning and optional phase inversion
         // pan: -1 = full left, 0 = centre, 1 = full right
-        // polarity: 1 = normal, -1 = inverted (for phase verification)
+        // polarity: 1 = normal, -1 = L/R out-of-phase (for mono cancellation test)
         //
-        // ROUTING ARCHITECTURE:
-        //   osc ──► toneGain (envelope) ──► polarityGain (±1) ──► panner ──► masterGain
+        // ROUTING ARCHITECTURE (normal, polarity = 1):
+        //   osc ──► toneGain (envelope) ──► panner ──► masterGain
         //
-        // Phase-inverted centre pips sum to silence when L+R are combined,
-        // providing an audible check that both channels are present and in-phase.
+        // ROUTING ARCHITECTURE (phase test, polarity = -1, pan = 0):
+        //   osc ──► toneGain (envelope) ──► splitter ──► L: gainL (+1) ──► merger ──► masterGain
+        //                                            ──► R: gainR (-1) ──►
+        //
+        // When polarity = -1 and pan = 0, L and R are in opposite phase.
+        // Mono sum (L+R) = 0, providing audible verification of correct phase alignment.
         function playTone(frequency, duration, pan, when, polarity = 1) {
           if (!audioCtx) return;
           if (audioCtx.state === 'suspended') audioCtx.resume();
 
           const osc = audioCtx.createOscillator();
           const toneGain = audioCtx.createGain();
-          const polarityGain = audioCtx.createGain();
-          const panner = audioCtx.createStereoPanner();
 
           osc.type = 'sine';
           osc.frequency.value = frequency;
 
-          // Compensate for StereoPanner equal-power panning loss at centre
-          // pan=0 causes -3 dB per channel, so we boost by +3 dB (×1.414) to maintain -18 dBFS
-          const centreCompensation = (pan === 0) ? 1.414 : 1.0;
-
           // Envelope for smooth start/stop (2ms fade)
           const fade = Math.min(0.002, duration / 2);
-          toneGain.gain.setValueAtTime(0, when);
-          toneGain.gain.linearRampToValueAtTime(centreCompensation, when + fade);
-          toneGain.gain.setValueAtTime(centreCompensation, when + duration - fade);
-          toneGain.gain.linearRampToValueAtTime(0, when + duration);
 
-          // Polarity: +1 normal, -1 inverted
-          polarityGain.gain.value = polarity;
+          // Phase test mode: L normal, R inverted (cancels to silence in mono)
+          if (polarity === -1 && pan === 0) {
+            // No centre compensation needed - we route directly to L and R at unity
+            toneGain.gain.setValueAtTime(0, when);
+            toneGain.gain.linearRampToValueAtTime(1, when + fade);
+            toneGain.gain.setValueAtTime(1, when + duration - fade);
+            toneGain.gain.linearRampToValueAtTime(0, when + duration);
 
-          // Stereo position
-          panner.pan.value = pan;
+            // Create separate L/R paths with opposite polarity
+            const gainL = audioCtx.createGain();
+            const gainR = audioCtx.createGain();
+            const merger = audioCtx.createChannelMerger(2);
 
-          // Signal chain
-          osc.connect(toneGain);
-          toneGain.connect(polarityGain);
-          polarityGain.connect(panner);
-          panner.connect(masterGain);
+            gainL.gain.value = 1;   // L: normal phase
+            gainR.gain.value = -1;  // R: inverted phase
+
+            // Route: osc → toneGain → split to gainL and gainR → merge to stereo
+            osc.connect(toneGain);
+            toneGain.connect(gainL);
+            toneGain.connect(gainR);
+            gainL.connect(merger, 0, 0);  // gainL output → merger L input
+            gainR.connect(merger, 0, 1);  // gainR output → merger R input
+            merger.connect(masterGain);
+          } else {
+            // Normal mode: use StereoPanner
+            const panner = audioCtx.createStereoPanner();
+
+            // Compensate for StereoPanner equal-power panning loss at centre
+            // pan=0 causes -3 dB per channel, so we boost by +3 dB (×1.414) to maintain -18 dBFS
+            const centreCompensation = (pan === 0) ? 1.414 : 1.0;
+
+            toneGain.gain.setValueAtTime(0, when);
+            toneGain.gain.linearRampToValueAtTime(centreCompensation, when + fade);
+            toneGain.gain.setValueAtTime(centreCompensation, when + duration - fade);
+            toneGain.gain.linearRampToValueAtTime(0, when + duration);
+
+            panner.pan.value = pan;
+
+            // Signal chain
+            osc.connect(toneGain);
+            toneGain.connect(panner);
+            panner.connect(masterGain);
+          }
 
           osc.start(when);
           osc.stop(when + duration);
