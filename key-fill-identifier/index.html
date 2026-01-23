@@ -1143,8 +1143,14 @@
       const idExplicitlySet = !isAutoMode;
 
       // Calculate ID from current minute (cycles 1-8)
+      // If we're past :59.5, use NEXT minute's ID (for pre-loading)
       function getIdFromMinute() {
-        const minute = new Date().getMinutes();
+        const now = new Date();
+        let minute = now.getMinutes();
+        const seconds = now.getSeconds() + (now.getMilliseconds() / 1000);
+        if (seconds >= 59.5) {
+          minute = (minute + 1) % 60;
+        }
         return (minute % 8) + 1;
       }
 
@@ -1201,16 +1207,26 @@
       if (isAutoMode) {
         function scheduleMinuteReload() {
           const now = new Date();
-          const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+          const secondsIntoMinute = now.getSeconds() + (now.getMilliseconds() / 1000);
+          // Reload at xx:59.500 to give page time to initialise before next minute's audio
+          const targetSecond = 59.5;
+          let msUntilReload;
+
+          if (secondsIntoMinute < targetSecond) {
+            // Target is later this minute
+            msUntilReload = (targetSecond - secondsIntoMinute) * 1000;
+          } else {
+            // Target is next minute's :59.5 (almost 60s away)
+            msUntilReload = (60 - secondsIntoMinute + targetSecond) * 1000;
+          }
 
           setTimeout(() => {
-            // Reload to pick up new minute-based ID
             window.location.reload();
-          }, msUntilNextMinute + 50); // +50ms buffer to ensure we're in the new minute
+          }, msUntilReload);
         }
 
         scheduleMinuteReload();
-        console.log(`Auto-cycling mode: ID ${channelId}, next change in ${Math.ceil((60 - new Date().getSeconds()))}s`);
+        console.log(`Auto-cycling mode: ID ${channelId}, reload at xx:59.5`);
       }
 
       // ═══════════════════════════════════════════════════════════════
