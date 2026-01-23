@@ -1534,8 +1534,8 @@
           const fade = Math.min(0.01, duration / 2);
 
           // Fade envelope: 10ms fade in/out
-          // MP3 level: +9 dB relative to default (1.0 × 2.818)
-          const mp3Gain = 2.818;
+          // MP3 level: +12 dB relative to default (1.0 × 3.981)
+          const mp3Gain = 3.981;
           gain.gain.setValueAtTime(0, startAt);
           gain.gain.linearRampToValueAtTime(mp3Gain, startAt + fade);
           gain.gain.setValueAtTime(mp3Gain, startAt + duration - fade);
@@ -1871,8 +1871,8 @@
           // Start at zero gain (silent)
           oscGain.gain.setValueAtTime(0, whenStart);
 
-          // Ringback level: -6 dB relative to default (0.5 × 0.501 = 0.251)
-          const ringbackGain = 0.251;
+          // Ringback level: -3 dB relative to default (0.5 × 0.708 = 0.354)
+          const ringbackGain = 0.354;
 
           // Schedule each ON interval with fade in/out
           for (const interval of onIntervals) {
