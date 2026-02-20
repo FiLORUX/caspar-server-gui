@@ -167,3 +167,7 @@ The Rust backend exposes 29 commands:
 ## Licence
 
 MIT
+
+---
+
+David Thåst · [thåst.se](https://xn--thst-roa.se) · [FiLORUX](https://github.com/FiLORUX)

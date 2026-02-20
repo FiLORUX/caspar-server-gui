@@ -1,6 +1,7 @@
 {
   "name": "caspar-server-gui",
   "private": true,
+  "author": "David Thåst <david@thast.se>",
   "version": "0.1.0",
   "type": "module",
   "scripts": {
