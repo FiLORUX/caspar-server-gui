@@ -4,7 +4,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::CasparConfig;
+use super::{CasparConfig, DeckLinkKeyer, DeckLinkLatency, VideoMode};
 
 /// Connector mapping for DeckLink cards with multiple SDI ports
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,12 +96,65 @@ impl GlobalConfig {
         Ok(config)
     }
 
-    /// Save to JSON file
+    /// Save to JSON file, with embedded `_`-prefixed documentation.
     pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), GlobalConfigError> {
-        let content = serde_json::to_string_pretty(self)?;
+        let content = serde_json::to_string_pretty(&self.documented_value()?)?;
         std::fs::write(path, content)?;
         Ok(())
     }
+
+    /// Build the JSON value for this profile with embedded documentation: an
+    /// `_about` note and an `_allowed` map of the accepted values for each
+    /// enumerated field, generated from the application's own definitions so the
+    /// lists can never drift from what the loader accepts. Keys starting with `_`
+    /// are ignored when the profile is read back.
+    fn documented_value(&self) -> Result<serde_json::Value, GlobalConfigError> {
+        let mut value = serde_json::to_value(self)?;
+        if let serde_json::Value::Object(map) = &mut value {
+            map.insert(
+                "_about".to_string(),
+                serde_json::Value::String(
+                    "CasparCG Server GUI profile. Keys starting with \"_\" are \
+                     documentation only and are ignored on load; \"_allowed\" lists \
+                     the accepted values for each enumerated field."
+                        .to_string(),
+                ),
+            );
+            map.insert("_allowed".to_string(), allowed_values());
+        }
+        Ok(value)
+    }
+}
+
+/// Serialise a set of enum values to their on-the-wire string form.
+fn allowed_strings<T: Serialize>(values: &[T]) -> Vec<String> {
+    values
+        .iter()
+        .filter_map(|v| serde_json::to_value(v).ok())
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect()
+}
+
+/// The accepted values for every enumerated profile field, generated from the
+/// schema where the variants iterate cleanly. Consumer types and duplex modes
+/// are small fixed sets (data-carrying enums) and are listed explicitly.
+fn allowed_values() -> serde_json::Value {
+    serde_json::json!({
+        "caspar.channels[].video_mode": allowed_strings(&VideoMode::all()),
+        "caspar.channels[].consumers[].type": ["decklink", "ndi", "screen", "system-audio"],
+        "caspar.channels[].consumers[] (decklink).keyer": allowed_strings(&[
+            DeckLinkKeyer::External,
+            DeckLinkKeyer::ExternalSeparateDevice,
+            DeckLinkKeyer::Internal,
+            DeckLinkKeyer::Default,
+        ]),
+        "caspar.channels[].consumers[] (decklink).latency": allowed_strings(&[
+            DeckLinkLatency::Normal,
+            DeckLinkLatency::Low,
+            DeckLinkLatency::Default,
+        ]),
+        "decklink.devices[].duplex_mode": ["full", "half"],
+    })
 }
 
 /// GUI settings stored separately from profiles
@@ -191,4 +244,28 @@ pub enum GlobalConfigError {
     Io(#[from] std::io::Error),
     #[error("JSON parse error: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn documented_profile_round_trips() {
+        let cfg = GlobalConfig::new("Test Profile");
+        let value = cfg.documented_value().unwrap();
+
+        // Documentation is embedded and generated from the schema.
+        assert!(value.get("_about").is_some());
+        assert!(value["_allowed"]["caspar.channels[].video_mode"]
+            .as_array()
+            .map(|modes| modes.iter().any(|v| v == "1080i5000"))
+            .unwrap_or(false));
+
+        // The `_`-prefixed notes are ignored on load, leaving the profile intact.
+        let json = serde_json::to_string(&value).unwrap();
+        let loaded: GlobalConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.name, "Test Profile");
+        assert_eq!(loaded.version, cfg.version);
+    }
 }
