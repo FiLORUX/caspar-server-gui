@@ -16,6 +16,11 @@
 // Include the generated DeckLink API header (from IDL via MIDL)
 #include "DeckLinkAPI_h.h"
 
+// The compile-time SDK version constant lives in its own plain header, which the
+// generated MIDL header does not pull in. Include it explicitly so the version
+// helper below resolves BLACKMAGIC_DECKLINK_API_VERSION_STRING.
+#include "DeckLinkAPIVersion.h"
+
 static bool g_initialised = false;
 
 /**
@@ -44,6 +49,40 @@ static void bstr_to_cstr(BSTR bstr, char* out, int max_length) {
     out[utf8len] = '\0';
 }
 
+// RAII guard that guarantees COM is initialised on the calling thread for the
+// duration of a single FFI call. Tauri dispatches each command on a tokio worker
+// thread, and COM apartments are per-thread — a one-shot global CoInitialize on
+// the first thread does not cover the others, so a later CoCreateInstance there
+// would fail with CO_E_NOTINITIALIZED. Balancing init/uninit per call keeps every
+// thread correct and the result deterministic regardless of which worker runs it.
+namespace {
+class ComApartment {
+public:
+    ComApartment() {
+        HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        // S_OK: we initialised it. S_FALSE: already initialised on this thread
+        // (refcount bumped) — both must be balanced with CoUninitialize.
+        // RPC_E_CHANGED_MODE: thread is already in another apartment (e.g. STA);
+        // COM is usable and must NOT be torn down by us.
+        ok_ = SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE;
+        balance_ = (hr == S_OK || hr == S_FALSE);
+    }
+    ~ComApartment() {
+        if (balance_) {
+            CoUninitialize();
+        }
+    }
+    bool ok() const { return ok_; }
+
+    ComApartment(const ComApartment&) = delete;
+    ComApartment& operator=(const ComApartment&) = delete;
+
+private:
+    bool ok_ = false;
+    bool balance_ = false;
+};
+} // namespace
+
 extern "C" {
 
 DeckLinkError decklink_init(void) {
@@ -68,15 +107,16 @@ void decklink_cleanup(void) {
 }
 
 DeckLinkError decklink_get_device_count(int32_t* count) {
-    if (!g_initialised) {
-        return DECKLINK_ERROR_NOT_INITIALISED;
-    }
-
     if (count == nullptr) {
         return DECKLINK_ERROR_INVALID_INDEX;
     }
 
     *count = 0;
+
+    ComApartment com;
+    if (!com.ok()) {
+        return DECKLINK_ERROR_COM_FAILED;
+    }
 
     IDeckLinkIterator* iterator = nullptr;
     HRESULT hr = CoCreateInstance(
@@ -106,10 +146,6 @@ DeckLinkError decklink_get_device_count(int32_t* count) {
 }
 
 DeckLinkError decklink_get_device_info(int32_t index, DeckLinkDeviceInfo* info) {
-    if (!g_initialised) {
-        return DECKLINK_ERROR_NOT_INITIALISED;
-    }
-
     if (info == nullptr || index < 0) {
         return DECKLINK_ERROR_INVALID_INDEX;
     }
@@ -119,6 +155,11 @@ DeckLinkError decklink_get_device_info(int32_t index, DeckLinkDeviceInfo* info) 
     info->index = index;
     info->persistent_id = -1;
     info->device_group_id = -1;
+
+    ComApartment com;
+    if (!com.ok()) {
+        return DECKLINK_ERROR_COM_FAILED;
+    }
 
     IDeckLinkIterator* iterator = nullptr;
     HRESULT hr = CoCreateInstance(
@@ -278,8 +319,39 @@ DeckLinkError decklink_get_api_version(char* version, int32_t max_length) {
     if (version == nullptr || max_length <= 0) {
         return DECKLINK_ERROR_INVALID_INDEX;
     }
+    version[0] = '\0';
 
-    // Use the version from the header
+    // Prefer the live version reported by the installed Desktop Video runtime.
+    // The compile-time SDK constant only tells us which headers we built against;
+    // it can differ from the driver actually loaded (observed: SDK 15.3 headers
+    // against a 16.0.1 runtime), so the runtime value is the one worth surfacing.
+    {
+        ComApartment com;
+        IDeckLinkAPIInformation* apiInfo = nullptr;
+        HRESULT hr = com.ok()
+            ? CoCreateInstance(
+                  CLSID_CDeckLinkAPIInformation,
+                  nullptr,
+                  CLSCTX_ALL,
+                  IID_IDeckLinkAPIInformation,
+                  reinterpret_cast<void**>(&apiInfo))
+            : E_FAIL;
+
+        if (SUCCEEDED(hr) && apiInfo) {
+            BSTR runtimeVersion = nullptr;
+            if (apiInfo->GetString(BMDDeckLinkAPIVersion, &runtimeVersion) == S_OK && runtimeVersion) {
+                bstr_to_cstr(runtimeVersion, version, max_length);
+                SysFreeString(runtimeVersion);
+            }
+            apiInfo->Release();
+
+            if (version[0] != '\0') {
+                return DECKLINK_OK;
+            }
+        }
+    }
+
+    // Fall back to the compile-time SDK version if the runtime query is unavailable.
     const char* api_version = BLACKMAGIC_DECKLINK_API_VERSION_STRING;
     int len = static_cast<int>(strlen(api_version));
     if (len >= max_length) {
