@@ -9,6 +9,7 @@ import type {
   GlobalConfig,
   VideoMode,
   DeckLinkConsumer,
+  DeckLinkDevice,
   NdiConsumer,
   ScreenConsumer,
 } from '../lib/types';
@@ -152,7 +153,7 @@ interface ChannelCardProps {
   onUpdate: (channel: Channel) => void;
   onRemove: () => void;
   canRemove: boolean;
-  deckLinkDevices: { index: number; display_name: string }[];
+  deckLinkDevices: DeckLinkDevice[];
   isTesting: boolean;
   canTest: boolean;
   onToggleTest: () => void;
@@ -331,7 +332,7 @@ interface ConsumerCardProps {
   consumer: Consumer;
   onUpdate: (consumer: Consumer) => void;
   onRemove: () => void;
-  deckLinkDevices: { index: number; display_name: string }[];
+  deckLinkDevices: DeckLinkDevice[];
 }
 
 function ConsumerCard({ consumer, onUpdate, onRemove, deckLinkDevices }: ConsumerCardProps) {
@@ -383,10 +384,12 @@ function ConsumerCard({ consumer, onUpdate, onRemove, deckLinkDevices }: Consume
 interface DeckLinkConsumerFormProps {
   consumer: DeckLinkConsumer;
   onUpdate: (consumer: DeckLinkConsumer) => void;
-  devices: { index: number; display_name: string }[];
+  devices: DeckLinkDevice[];
 }
 
 function DeckLinkConsumerForm({ consumer, onUpdate, devices }: DeckLinkConsumerFormProps) {
+  const selectedDevice = devices.find((d) => d.index === consumer.device);
+
   return (
     <div className="grid grid-cols-2 gap-3 text-sm">
       <div>
@@ -451,10 +454,38 @@ function DeckLinkConsumerForm({ consumer, onUpdate, devices }: DeckLinkConsumerF
         >
           <option value="external">External</option>
           <option value="external_separate_device">External (Separate Device)</option>
-          <option value="internal">Internal</option>
+          <option
+            value="internal"
+            disabled={selectedDevice ? !selectedDevice.supports_internal_keying : false}
+          >
+            Internal
+            {selectedDevice && !selectedDevice.supports_internal_keying
+              ? ' — not supported by this card'
+              : ''}
+          </option>
           <option value="default">Default</option>
         </select>
       </div>
+
+      {selectedDevice && (
+        <div className="col-span-2 text-xs text-[var(--color-text-muted)]">
+          {selectedDevice.model_name} keying:{' '}
+          {selectedDevice.supports_internal_keying || selectedDevice.supports_external_keying
+            ? [
+                selectedDevice.supports_internal_keying && 'internal',
+                selectedDevice.supports_external_keying && 'external',
+              ]
+                .filter(Boolean)
+                .join(', ')
+            : 'none — single output, fill or key only (pair a separate key device for fill+key)'}
+          {consumer.keyer === 'internal' && !selectedDevice.supports_internal_keying && (
+            <span className="text-amber-400">
+              {' '}
+              · the selected Internal keyer is unavailable on this card
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="col-span-2 flex items-center gap-4">
         <label className="flex items-center gap-2 cursor-pointer">
