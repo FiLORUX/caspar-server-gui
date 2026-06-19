@@ -134,12 +134,33 @@ mod ffi {
         }
     }
 
+    #[repr(C)]
+    #[derive(Debug)]
+    pub struct DeckLinkStatusInfo {
+        pub input_signal_locked: bool,
+        pub input_display_mode: [c_char; 16],
+        pub reference_signal_locked: bool,
+        pub reference_display_mode: [c_char; 16],
+    }
+
+    impl Default for DeckLinkStatusInfo {
+        fn default() -> Self {
+            Self {
+                input_signal_locked: false,
+                input_display_mode: [0; 16],
+                reference_signal_locked: false,
+                reference_display_mode: [0; 16],
+            }
+        }
+    }
+
     extern "C" {
         pub fn decklink_init() -> i32;
         pub fn decklink_cleanup();
         pub fn decklink_get_device_count(count: *mut i32) -> i32;
         pub fn decklink_get_device_info(index: i32, info: *mut DeckLinkDeviceInfo) -> i32;
         pub fn decklink_get_api_version(version: *mut c_char, max_length: i32) -> i32;
+        pub fn decklink_get_device_status(index: i32, status: *mut DeckLinkStatusInfo) -> i32;
     }
 
     /// Convert a C string buffer to a Rust String
@@ -382,4 +403,129 @@ pub fn get_driver_version() -> Result<Option<String>, DeckLinkError> {
     // Driver version detection would require additional SDK calls
     // For now, use API version as a proxy
     get_api_version()
+}
+
+/// Live signal status for a DeckLink device, sampled from IDeckLinkStatus.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckLinkStatus {
+    /// Whether a valid input signal is currently locked
+    pub input_signal_locked: bool,
+    /// Human-readable input format (e.g. "1080i59.94"), when locked
+    pub input_display_mode: Option<String>,
+    /// Whether a reference (genlock) signal is locked
+    pub reference_signal_locked: bool,
+    /// Human-readable reference format, when locked
+    pub reference_display_mode: Option<String>,
+    /// Inferred reference type ("Tri-level" / "Black Burst"), when locked
+    pub reference_type: Option<String>,
+}
+
+/// Map a BMDDisplayMode four-character code to a human-readable format name,
+/// falling back to the raw code for anything not in the common table.
+#[cfg(feature = "decklink")]
+fn display_mode_name(fourcc: &str) -> Option<String> {
+    let trimmed = fourcc.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let friendly = match trimmed {
+        "ntsc" => "NTSC",
+        "pal" => "PAL",
+        "Hi50" => "1080i50",
+        "Hi59" => "1080i59.94",
+        "Hi60" => "1080i60",
+        "Hp23" => "1080p23.98",
+        "Hp24" => "1080p24",
+        "Hp25" => "1080p25",
+        "Hp29" => "1080p29.97",
+        "Hp30" => "1080p30",
+        "Hp50" => "1080p50",
+        "Hp59" => "1080p59.94",
+        "Hp60" => "1080p60",
+        "hp50" => "720p50",
+        "hp59" => "720p59.94",
+        "hp60" => "720p60",
+        "4k23" => "2160p23.98",
+        "4k24" => "2160p24",
+        "4k25" => "2160p25",
+        "4k29" => "2160p29.97",
+        "4k30" => "2160p30",
+        "4k50" => "2160p50",
+        "4k59" => "2160p59.94",
+        "4k60" => "2160p60",
+        other => other,
+    };
+    Some(friendly.to_string())
+}
+
+/// Infer the reference signal type from the locked raster, mirroring how Desktop
+/// Video reports it: HD/4K rasters use tri-level sync, SD uses black burst.
+#[cfg(feature = "decklink")]
+fn reference_type(fourcc: &str) -> Option<String> {
+    let trimmed = fourcc.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let kind = match trimmed.chars().next().unwrap_or(' ') {
+        'H' | '4' | 'h' => "Tri-level",
+        'n' | 'p' => "Black Burst",
+        _ => "Unknown",
+    };
+    Some(kind.to_string())
+}
+
+/// Get the live signal status for a device (1-based index, as enumerated).
+#[cfg(feature = "decklink")]
+pub fn get_device_status(index: u32) -> Result<DeckLinkStatus, DeckLinkError> {
+    init()?;
+
+    unsafe {
+        let mut info = ffi::DeckLinkStatusInfo::default();
+        let zero_based = index.saturating_sub(1) as i32;
+        let result = ffi::decklink_get_device_status(zero_based, &mut info);
+
+        match result {
+            ffi::DECKLINK_OK => {
+                let input_mode = ffi::cstr_to_string(&info.input_display_mode);
+                let ref_mode = ffi::cstr_to_string(&info.reference_display_mode);
+                Ok(DeckLinkStatus {
+                    input_signal_locked: info.input_signal_locked,
+                    input_display_mode: if info.input_signal_locked {
+                        display_mode_name(&input_mode)
+                    } else {
+                        None
+                    },
+                    reference_signal_locked: info.reference_signal_locked,
+                    reference_display_mode: if info.reference_signal_locked {
+                        display_mode_name(&ref_mode)
+                    } else {
+                        None
+                    },
+                    reference_type: if info.reference_signal_locked {
+                        reference_type(&ref_mode)
+                    } else {
+                        None
+                    },
+                })
+            }
+            ffi::DECKLINK_ERROR_NOT_INITIALISED => Err(DeckLinkError::NotInitialised),
+            ffi::DECKLINK_ERROR_NO_DRIVER => Err(DeckLinkError::NoDriver),
+            _ => Err(DeckLinkError::EnumerationFailed(format!(
+                "Failed to query device status (error {})",
+                result
+            ))),
+        }
+    }
+}
+
+#[cfg(not(feature = "decklink"))]
+pub fn get_device_status(_index: u32) -> Result<DeckLinkStatus, DeckLinkError> {
+    // Mock status for development without the SDK
+    Ok(DeckLinkStatus {
+        input_signal_locked: false,
+        input_display_mode: None,
+        reference_signal_locked: false,
+        reference_display_mode: None,
+        reference_type: None,
+    })
 }

@@ -15,12 +15,15 @@ use tokio::sync::Mutex;
 use config::{
     generate_caspar_xml, parse_caspar_xml, CasparConfig, GlobalConfig, GuiSettings,
 };
-use decklink::{DeckLinkDevice, DuplexMode};
+use decklink::{DeckLinkDevice, DeckLinkStatus, DuplexMode};
 
 // Public re-exports for hardware-in-the-loop tests and external tooling. These
 // expose the same enumeration path the Tauri commands use, without making the
 // whole module public.
-pub use decklink::{get_api_version as decklink_api_version, list_devices as enumerate_decklink_devices};
+pub use decklink::{
+    get_api_version as decklink_api_version, get_device_status as decklink_device_status,
+    list_devices as enumerate_decklink_devices,
+};
 
 /// Application state shared across commands
 pub struct AppState {
@@ -164,6 +167,12 @@ async fn set_decklink_duplex_mode(
 #[tauri::command]
 async fn get_decklink_driver_version() -> Result<Option<String>, String> {
     decklink::get_driver_version().map_err(|e| e.to_string())
+}
+
+/// Get live signal status for a DeckLink device (by 1-based device index)
+#[tauri::command]
+async fn get_decklink_status(index: u32) -> Result<DeckLinkStatus, String> {
+    decklink::get_device_status(index).map_err(|e| e.to_string())
 }
 
 // ============================================================================
@@ -518,6 +527,7 @@ pub fn run() {
             set_decklink_label,
             set_decklink_duplex_mode,
             get_decklink_driver_version,
+            get_decklink_status,
             // AMCP commands
             amcp_connect,
             amcp_disconnect,

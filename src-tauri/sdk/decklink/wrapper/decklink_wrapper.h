@@ -81,6 +81,18 @@ typedef struct {
 } DeckLinkDeviceInfo;
 
 /**
+ * Live device status, sampled from IDeckLinkStatus. Display modes are returned
+ * as their SDK four-character code (e.g. "Hi59" for 1080i59.94), or empty when
+ * nothing is locked.
+ */
+typedef struct {
+    bool input_signal_locked;
+    char input_display_mode[16];
+    bool reference_signal_locked;
+    char reference_display_mode[16];
+} DeckLinkStatusInfo;
+
+/**
  * Error codes
  */
 typedef enum {
@@ -129,6 +141,16 @@ DeckLinkError decklink_get_device_info(int32_t index, DeckLinkDeviceInfo* info);
  * @return DECKLINK_OK on success
  */
 DeckLinkError decklink_get_api_version(char* version, int32_t max_length);
+
+/**
+ * Get the live status of a specific DeckLink device (input/reference signal
+ * lock and the corresponding display modes) via IDeckLinkStatus.
+ *
+ * @param index Device index (0-based)
+ * @param status Pointer to DeckLinkStatusInfo structure to fill
+ * @return DECKLINK_OK on success, error code otherwise
+ */
+DeckLinkError decklink_get_device_status(int32_t index, DeckLinkStatusInfo* status);
 
 #ifdef __cplusplus
 }

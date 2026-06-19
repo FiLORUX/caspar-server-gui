@@ -6,6 +6,7 @@ import type {
   AmcpResponse,
   CasparConfig,
   DeckLinkDevice,
+  DeckLinkStatus,
   GlobalConfig,
   GuiSettings,
   SystemVersions,
@@ -79,6 +80,10 @@ export async function setDeckLinkDuplexMode(
 
 export async function getDeckLinkDriverVersion(): Promise<string | null> {
   return invoke('get_decklink_driver_version');
+}
+
+export async function getDeckLinkStatus(index: number): Promise<DeckLinkStatus> {
+  return invoke('get_decklink_status', { index });
 }
 
 // ============================================================================

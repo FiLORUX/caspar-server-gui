@@ -230,6 +230,14 @@ export interface DeckLinkDevice {
   max_audio_channels: number;
 }
 
+export interface DeckLinkStatus {
+  input_signal_locked: boolean;
+  input_display_mode: string | null;
+  reference_signal_locked: boolean;
+  reference_display_mode: string | null;
+  reference_type: string | null;
+}
+
 // ============================================================================
 // System Info
 // ============================================================================

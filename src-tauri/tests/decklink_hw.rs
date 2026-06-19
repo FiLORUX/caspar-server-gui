@@ -59,3 +59,29 @@ fn enumerate_decklink_from_many_threads() {
     }
     println!("All 8 worker threads enumerated {baseline} device(s) consistently");
 }
+
+// Live signal status via IDeckLinkStatus. With no input connected the card still
+// reports a deterministic "not locked" — that is a valid, expected result.
+#[test]
+fn read_decklink_status() {
+    let devices = caspar_server_gui_lib::enumerate_decklink_devices()
+        .expect("enumeration should not error");
+    if devices.is_empty() {
+        println!("no DeckLink devices present — skipping status check");
+        return;
+    }
+
+    let device = &devices[0];
+    let status = caspar_server_gui_lib::decklink_device_status(device.index)
+        .expect("status query should succeed for a present device");
+
+    println!(
+        "Device {} status: input_locked={} input={:?} ref_locked={} ref={:?} ref_type={:?}",
+        device.index,
+        status.input_signal_locked,
+        status.input_display_mode,
+        status.reference_signal_locked,
+        status.reference_display_mode,
+        status.reference_type
+    );
+}

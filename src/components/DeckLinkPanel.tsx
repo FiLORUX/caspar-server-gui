@@ -1,12 +1,46 @@
 // DeckLink configuration panel
 // Shows installed DeckLink devices and allows configuration
 
+import { useEffect, useState } from 'react';
 import { useAppStore } from '../lib/store';
 import * as tauri from '../lib/tauri';
-import type { DeckLinkDevice } from '../lib/types';
+import type { DeckLinkDevice, DeckLinkStatus } from '../lib/types';
 
 export function DeckLinkPanel() {
   const { deckLinkDevices, loadDeckLinkDevices, currentConfig, updateConfig } = useAppStore();
+  const [statuses, setStatuses] = useState<Record<string, DeckLinkStatus>>({});
+
+  // Poll live signal status (~2 s). IDeckLinkStatus is passive, so this does not
+  // disturb capture/playback; it just reflects input/reference lock in the UI.
+  useEffect(() => {
+    if (deckLinkDevices.length === 0) return;
+    let cancelled = false;
+    const poll = async () => {
+      const entries = await Promise.all(
+        deckLinkDevices.map(async (d) => {
+          try {
+            return [d.persistent_id, await tauri.getDeckLinkStatus(d.index)] as const;
+          } catch {
+            return null;
+          }
+        })
+      );
+      if (cancelled) return;
+      setStatuses((prev) => {
+        const next = { ...prev };
+        for (const entry of entries) {
+          if (entry) next[entry[0]] = entry[1];
+        }
+        return next;
+      });
+    };
+    poll();
+    const id = setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [deckLinkDevices]);
 
   const handleRefresh = async () => {
     await loadDeckLinkDevices();
@@ -99,6 +133,7 @@ export function DeckLinkPanel() {
               key={device.persistent_id}
               device={device}
               label={getDeviceLabel(device)}
+              status={statuses[device.persistent_id]}
               onLabelChange={(label) => updateDeviceLabel(device.persistent_id, label)}
               onDuplexModeChange={(mode) => handleSetDuplexMode(device, mode)}
             />
@@ -118,6 +153,7 @@ export function DeckLinkPanel() {
 interface DeckLinkDeviceCardProps {
   device: DeckLinkDevice;
   label: string;
+  status?: DeckLinkStatus;
   onLabelChange: (label: string) => void;
   onDuplexModeChange: (mode: string) => void;
 }
@@ -125,6 +161,7 @@ interface DeckLinkDeviceCardProps {
 function DeckLinkDeviceCard({
   device,
   label,
+  status,
   onLabelChange,
   onDuplexModeChange,
 }: DeckLinkDeviceCardProps) {
@@ -198,6 +235,35 @@ function DeckLinkDeviceCard({
           </span>
         )}
       </div>
+
+      {/* Live signal status (IDeckLinkStatus, polled) */}
+      {status && (
+        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+          <span
+            className={`px-2 py-1 rounded ${
+              status.input_signal_locked
+                ? 'bg-emerald-600/20 text-emerald-400'
+                : 'bg-[var(--color-bg-primary)] text-[var(--color-text-muted)]'
+            }`}
+          >
+            Input: {status.input_signal_locked ? status.input_display_mode ?? 'locked' : 'no signal'}
+          </span>
+          <span
+            className={`px-2 py-1 rounded ${
+              status.reference_signal_locked
+                ? 'bg-emerald-600/20 text-emerald-400'
+                : 'bg-[var(--color-bg-primary)] text-[var(--color-text-muted)]'
+            }`}
+          >
+            Ref:{' '}
+            {status.reference_signal_locked
+              ? `${status.reference_display_mode ?? 'locked'}${
+                  status.reference_type ? ` (${status.reference_type})` : ''
+                }`
+              : 'none'}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

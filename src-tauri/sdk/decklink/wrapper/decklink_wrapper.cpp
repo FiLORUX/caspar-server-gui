@@ -49,6 +49,24 @@ static void bstr_to_cstr(BSTR bstr, char* out, int max_length) {
     out[utf8len] = '\0';
 }
 
+/**
+ * Convert a four-character code (as stored big-endian in a BMDDisplayMode) into
+ * a printable C string, skipping any non-printable bytes. A zero code yields "".
+ */
+static void fourcc_to_cstr(uint32_t code, char* out, int max_length) {
+    if (out == nullptr || max_length <= 0) {
+        return;
+    }
+    int j = 0;
+    for (int shift = 24; shift >= 0 && j < max_length - 1; shift -= 8) {
+        char c = static_cast<char>((code >> shift) & 0xFF);
+        if (c >= 32 && c < 127) {
+            out[j++] = c;
+        }
+    }
+    out[j] = '\0';
+}
+
 // RAII guard that guarantees COM is initialised on the calling thread for the
 // duration of a single FFI call. Tauri dispatches each command on a tokio worker
 // thread, and COM apartments are per-thread — a one-shot global CoInitialize on
@@ -363,6 +381,79 @@ DeckLinkError decklink_get_api_version(char* version, int32_t max_length) {
     return DECKLINK_OK;
 }
 
+DeckLinkError decklink_get_device_status(int32_t index, DeckLinkStatusInfo* status) {
+    if (status == nullptr || index < 0) {
+        return DECKLINK_ERROR_INVALID_INDEX;
+    }
+
+    memset(status, 0, sizeof(DeckLinkStatusInfo));
+
+    ComApartment com;
+    if (!com.ok()) {
+        return DECKLINK_ERROR_COM_FAILED;
+    }
+
+    IDeckLinkIterator* iterator = nullptr;
+    HRESULT hr = CoCreateInstance(
+        CLSID_CDeckLinkIterator,
+        nullptr,
+        CLSCTX_ALL,
+        IID_IDeckLinkIterator,
+        reinterpret_cast<void**>(&iterator)
+    );
+
+    if (FAILED(hr) || iterator == nullptr) {
+        return DECKLINK_ERROR_NO_DRIVER;
+    }
+
+    IDeckLink* deckLink = nullptr;
+    int32_t currentIndex = 0;
+    DeckLinkError result = DECKLINK_ERROR_INVALID_INDEX;
+
+    while (iterator->Next(&deckLink) == S_OK) {
+        if (currentIndex == index) {
+            IDeckLinkStatus* deviceStatus = nullptr;
+            if (deckLink->QueryInterface(IID_IDeckLinkStatus, reinterpret_cast<void**>(&deviceStatus)) == S_OK && deviceStatus) {
+                // IDeckLinkStatus is a passive interface: it reports the current
+                // signal state without opening the input, so polling it is cheap.
+                BOOL inputLocked = FALSE;
+                if (deviceStatus->GetFlag(bmdDeckLinkStatusVideoInputSignalLocked, &inputLocked) == S_OK) {
+                    status->input_signal_locked = inputLocked != FALSE;
+                }
+
+                int64_t inputMode = 0;
+                if (deviceStatus->GetInt(bmdDeckLinkStatusCurrentVideoInputMode, &inputMode) == S_OK) {
+                    fourcc_to_cstr(static_cast<uint32_t>(inputMode), status->input_display_mode, sizeof(status->input_display_mode));
+                }
+
+                BOOL referenceLocked = FALSE;
+                if (deviceStatus->GetFlag(bmdDeckLinkStatusReferenceSignalLocked, &referenceLocked) == S_OK) {
+                    status->reference_signal_locked = referenceLocked != FALSE;
+                }
+
+                int64_t referenceMode = 0;
+                if (deviceStatus->GetInt(bmdDeckLinkStatusReferenceSignalMode, &referenceMode) == S_OK) {
+                    fourcc_to_cstr(static_cast<uint32_t>(referenceMode), status->reference_display_mode, sizeof(status->reference_display_mode));
+                }
+
+                deviceStatus->Release();
+                result = DECKLINK_OK;
+            } else {
+                result = DECKLINK_ERROR_QUERY_FAILED;
+            }
+
+            deckLink->Release();
+            break;
+        }
+
+        currentIndex++;
+        deckLink->Release();
+    }
+
+    iterator->Release();
+    return result;
+}
+
 } // extern "C"
 
 #else
@@ -397,6 +488,14 @@ DeckLinkError decklink_get_api_version(char* version, int32_t max_length) {
         version[max_length - 1] = '\0';
     }
     return DECKLINK_OK;
+}
+
+DeckLinkError decklink_get_device_status(int32_t index, DeckLinkStatusInfo* status) {
+    (void)index;
+    if (status) {
+        memset(status, 0, sizeof(DeckLinkStatusInfo));
+    }
+    return DECKLINK_ERROR_NO_DRIVER;
 }
 
 } // extern "C"
