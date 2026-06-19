@@ -221,8 +221,8 @@ export interface DeckLinkDevice {
   device_label?: string;
   supports_duplex: boolean;
   duplex_mode?: string;
-  sdi_inputs: number;
-  sdi_outputs: number;
+  input_connectors: string[];
+  output_connectors: string[];
   supports_internal_keying: boolean;
   supports_external_keying: boolean;
   supports_capture: boolean;

@@ -20,10 +20,10 @@ pub struct DeckLinkDevice {
     pub supports_duplex: bool,
     /// Current duplex mode if applicable
     pub duplex_mode: Option<String>,
-    /// Number of SDI inputs
-    pub sdi_inputs: u32,
-    /// Number of SDI outputs
-    pub sdi_outputs: u32,
+    /// Physical input connector types the device offers (e.g. "SDI", "HDMI")
+    pub input_connectors: Vec<String>,
+    /// Physical output connector types the device offers (e.g. "SDI", "HDMI")
+    pub output_connectors: Vec<String>,
     /// Whether device supports internal keying
     pub supports_internal_keying: bool,
     /// Whether device supports external keying
@@ -218,9 +218,9 @@ pub fn list_devices() -> Result<Vec<DeckLinkDevice>, DeckLinkError> {
                 let model_name = ffi::cstr_to_string(&info.model_name);
                 let device_label = ffi::cstr_to_string(&info.device_label);
 
-                // Count SDI connections
-                let sdi_inputs = count_sdi_connections(info.video_input_connections);
-                let sdi_outputs = count_sdi_connections(info.video_output_connections);
+                // Decode the physical connector bitmasks into connector lists
+                let input_connectors = decode_connectors(info.video_input_connections);
+                let output_connectors = decode_connectors(info.video_output_connections);
 
                 // Determine duplex support (Duo/Quad cards)
                 let supports_duplex =
@@ -242,8 +242,8 @@ pub fn list_devices() -> Result<Vec<DeckLinkDevice>, DeckLinkError> {
                     } else {
                         None
                     },
-                    sdi_inputs,
-                    sdi_outputs,
+                    input_connectors,
+                    output_connectors,
                     supports_internal_keying: info.supports_internal_keying,
                     supports_external_keying: info.supports_external_keying,
                     supports_capture: (info.io_support & ffi::DECKLINK_IO_SUPPORT_CAPTURE) != 0,
@@ -259,13 +259,26 @@ pub fn list_devices() -> Result<Vec<DeckLinkDevice>, DeckLinkError> {
     }
 }
 
+/// Decode a BMDVideoConnection bitmask into human-readable connector names.
+/// The bit values match the SDK's BMDVideoConnection enum (SDI = bit 0, …).
 #[cfg(feature = "decklink")]
-fn count_sdi_connections(connections: u32) -> u32 {
-    if (connections & ffi::DECKLINK_VIDEO_CONNECTION_SDI) != 0 {
-        1 // At least 1, could count more accurately with additional flags
-    } else {
-        0
-    }
+fn decode_connectors(mask: u32) -> Vec<String> {
+    const CONNECTORS: [(u32, &str); 9] = [
+        (1 << 0, "SDI"),
+        (1 << 1, "HDMI"),
+        (1 << 2, "Optical SDI"),
+        (1 << 3, "Component"),
+        (1 << 4, "Composite"),
+        (1 << 5, "S-Video"),
+        (1 << 6, "Ethernet"),
+        (1 << 7, "Optical Ethernet"),
+        (1 << 8, "Internal"),
+    ];
+    CONNECTORS
+        .iter()
+        .filter(|(bit, _)| mask & bit != 0)
+        .map(|(_, name)| (*name).to_string())
+        .collect()
 }
 
 #[cfg(not(feature = "decklink"))]
@@ -280,8 +293,8 @@ pub fn list_devices() -> Result<Vec<DeckLinkDevice>, DeckLinkError> {
             device_label: None,
             supports_duplex: true,
             duplex_mode: Some("half".to_string()),
-            sdi_inputs: 2,
-            sdi_outputs: 2,
+            input_connectors: vec!["SDI".to_string()],
+            output_connectors: vec!["SDI".to_string()],
             supports_internal_keying: false,
             supports_external_keying: true,
             supports_capture: true,
@@ -296,8 +309,8 @@ pub fn list_devices() -> Result<Vec<DeckLinkDevice>, DeckLinkError> {
             device_label: None,
             supports_duplex: true,
             duplex_mode: Some("half".to_string()),
-            sdi_inputs: 2,
-            sdi_outputs: 2,
+            input_connectors: vec!["SDI".to_string()],
+            output_connectors: vec!["SDI".to_string()],
             supports_internal_keying: false,
             supports_external_keying: true,
             supports_capture: true,
@@ -312,8 +325,8 @@ pub fn list_devices() -> Result<Vec<DeckLinkDevice>, DeckLinkError> {
             device_label: Some("PGM Output".to_string()),
             supports_duplex: false,
             duplex_mode: None,
-            sdi_inputs: 0,
-            sdi_outputs: 1,
+            input_connectors: vec![],
+            output_connectors: vec!["SDI".to_string(), "HDMI".to_string()],
             supports_internal_keying: false,
             supports_external_keying: false,
             supports_capture: false,

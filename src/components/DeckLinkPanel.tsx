@@ -177,14 +177,14 @@ function DeckLinkDeviceCard({
 
       {/* Capabilities */}
       <div className="mt-4 flex flex-wrap gap-2">
-        {device.sdi_inputs > 0 && (
+        {device.input_connectors.length > 0 && (
           <span className="px-2 py-1 text-xs bg-[var(--color-bg-primary)] rounded">
-            {device.sdi_inputs} SDI Input{device.sdi_inputs > 1 ? 's' : ''}
+            In: {device.input_connectors.join(', ')}
           </span>
         )}
-        {device.sdi_outputs > 0 && (
+        {device.output_connectors.length > 0 && (
           <span className="px-2 py-1 text-xs bg-[var(--color-bg-primary)] rounded">
-            {device.sdi_outputs} SDI Output{device.sdi_outputs > 1 ? 's' : ''}
+            Out: {device.output_connectors.join(', ')}
           </span>
         )}
         {device.supports_internal_keying && (
