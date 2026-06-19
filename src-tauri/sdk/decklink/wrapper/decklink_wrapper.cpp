@@ -454,6 +454,73 @@ DeckLinkError decklink_get_device_status(int32_t index, DeckLinkStatusInfo* stat
     return result;
 }
 
+DeckLinkError decklink_set_device_label(int32_t index, const char* label) {
+    if (label == nullptr || index < 0) {
+        return DECKLINK_ERROR_INVALID_INDEX;
+    }
+
+    ComApartment com;
+    if (!com.ok()) {
+        return DECKLINK_ERROR_COM_FAILED;
+    }
+
+    IDeckLinkIterator* iterator = nullptr;
+    HRESULT hr = CoCreateInstance(
+        CLSID_CDeckLinkIterator,
+        nullptr,
+        CLSCTX_ALL,
+        IID_IDeckLinkIterator,
+        reinterpret_cast<void**>(&iterator)
+    );
+
+    if (FAILED(hr) || iterator == nullptr) {
+        return DECKLINK_ERROR_NO_DRIVER;
+    }
+
+    IDeckLink* deckLink = nullptr;
+    int32_t currentIndex = 0;
+    DeckLinkError result = DECKLINK_ERROR_INVALID_INDEX;
+
+    while (iterator->Next(&deckLink) == S_OK) {
+        if (currentIndex == index) {
+            IDeckLinkConfiguration* config = nullptr;
+            if (deckLink->QueryInterface(IID_IDeckLinkConfiguration, reinterpret_cast<void**>(&config)) == S_OK && config) {
+                // Convert the UTF-8 label to a wide BSTR for the COM string setter.
+                int wlen = MultiByteToWideChar(CP_UTF8, 0, label, -1, nullptr, 0);
+                if (wlen > 0) {
+                    std::wstring wide(static_cast<size_t>(wlen), L'\0');
+                    MultiByteToWideChar(CP_UTF8, 0, label, -1, &wide[0], wlen);
+                    BSTR labelBstr = SysAllocString(wide.c_str());
+                    if (labelBstr != nullptr) {
+                        HRESULT setHr = config->SetString(bmdDeckLinkConfigDeviceInformationLabel, labelBstr);
+                        SysFreeString(labelBstr);
+                        // Commit to NVRAM so it persists and is visible to other apps.
+                        if (SUCCEEDED(setHr) && SUCCEEDED(config->WriteConfigurationToPreferences())) {
+                            result = DECKLINK_OK;
+                        } else {
+                            result = DECKLINK_ERROR_QUERY_FAILED;
+                        }
+                    } else {
+                        result = DECKLINK_ERROR_QUERY_FAILED;
+                    }
+                } else {
+                    result = DECKLINK_ERROR_QUERY_FAILED;
+                }
+                config->Release();
+            } else {
+                result = DECKLINK_ERROR_QUERY_FAILED;
+            }
+            deckLink->Release();
+            break;
+        }
+        currentIndex++;
+        deckLink->Release();
+    }
+
+    iterator->Release();
+    return result;
+}
+
 } // extern "C"
 
 #else
@@ -495,6 +562,12 @@ DeckLinkError decklink_get_device_status(int32_t index, DeckLinkStatusInfo* stat
     if (status) {
         memset(status, 0, sizeof(DeckLinkStatusInfo));
     }
+    return DECKLINK_ERROR_NO_DRIVER;
+}
+
+DeckLinkError decklink_set_device_label(int32_t index, const char* label) {
+    (void)index;
+    (void)label;
     return DECKLINK_ERROR_NO_DRIVER;
 }
 

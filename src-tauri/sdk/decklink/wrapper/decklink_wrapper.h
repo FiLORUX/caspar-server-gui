@@ -152,6 +152,18 @@ DeckLinkError decklink_get_api_version(char* version, int32_t max_length);
  */
 DeckLinkError decklink_get_device_status(int32_t index, DeckLinkStatusInfo* status);
 
+/**
+ * Write a persistent device label to the card's NVRAM via IDeckLinkConfiguration
+ * (bmdDeckLinkConfigDeviceInformationLabel), committed with
+ * WriteConfigurationToPreferences so it survives reboots and is visible to other
+ * applications (Desktop Video, CasparCG).
+ *
+ * @param index Device index (0-based)
+ * @param label UTF-8 label string
+ * @return DECKLINK_OK on success, error code otherwise
+ */
+DeckLinkError decklink_set_device_label(int32_t index, const char* label);
+
 #ifdef __cplusplus
 }
 #endif

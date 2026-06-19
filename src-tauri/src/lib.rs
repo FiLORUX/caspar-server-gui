@@ -22,7 +22,7 @@ use decklink::{DeckLinkDevice, DeckLinkStatus, DuplexMode};
 // whole module public.
 pub use decklink::{
     get_api_version as decklink_api_version, get_device_status as decklink_device_status,
-    list_devices as enumerate_decklink_devices,
+    list_devices as enumerate_decklink_devices, set_device_label as set_decklink_device_label,
 };
 
 /// Application state shared across commands
@@ -142,15 +142,13 @@ async fn get_decklink_info(persistent_id: String) -> Result<DeckLinkDevice, Stri
     decklink::get_device_by_id(&persistent_id).map_err(|e| e.to_string())
 }
 
-/// Set the display label for a DeckLink device
+/// Write a persistent display label to the DeckLink device's NVRAM
 #[tauri::command]
 async fn set_decklink_label(
-    _persistent_id: String,
-    _label: String,
+    persistent_id: String,
+    label: String,
 ) -> Result<(), String> {
-    // Note: DeckLink SDK doesn't support persistent labels
-    // This would be stored in our global config instead
-    Ok(())
+    decklink::set_device_label(&persistent_id, &label).map_err(|e| e.to_string())
 }
 
 /// Set the duplex mode for a DeckLink device

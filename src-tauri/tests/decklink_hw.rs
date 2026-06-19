@@ -85,3 +85,34 @@ fn read_decklink_status() {
         status.reference_type
     );
 }
+
+// Non-destructive label write: read the current label, write a test value, read
+// it back, then restore the original before asserting so the card is left as it
+// was found even if the assertion fails.
+#[test]
+fn write_and_restore_decklink_label() {
+    let devices = caspar_server_gui_lib::enumerate_decklink_devices()
+        .expect("enumeration should not error");
+    if devices.is_empty() {
+        println!("no DeckLink devices present — skipping label write");
+        return;
+    }
+
+    let id = devices[0].persistent_id.clone();
+    let original = devices[0].device_label.clone().unwrap_or_default();
+
+    caspar_server_gui_lib::set_decklink_device_label(&id, "TCIS-HW-TEST")
+        .expect("label write should succeed");
+
+    let after_write = caspar_server_gui_lib::enumerate_decklink_devices()
+        .unwrap()
+        .into_iter()
+        .find(|d| d.persistent_id == id)
+        .and_then(|d| d.device_label);
+
+    // Restore first, so a failed assertion never leaves the card relabelled.
+    let _ = caspar_server_gui_lib::set_decklink_device_label(&id, &original);
+
+    assert_eq!(after_write.as_deref(), Some("TCIS-HW-TEST"));
+    println!("label write verified and restored to {original:?}");
+}

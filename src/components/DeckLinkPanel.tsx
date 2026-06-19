@@ -56,6 +56,16 @@ export function DeckLinkPanel() {
     }
   };
 
+  const handleWriteLabel = async (device: DeckLinkDevice, label: string) => {
+    try {
+      await tauri.setDeckLinkLabel(device.persistent_id, label);
+      await loadDeckLinkDevices();
+    } catch (error) {
+      console.error('Failed to write label to device:', error);
+      alert(`Failed to write label to device: ${error}`);
+    }
+  };
+
   const updateDeviceLabel = (persistentId: string, label: string) => {
     if (!currentConfig) return;
 
@@ -136,6 +146,7 @@ export function DeckLinkPanel() {
               status={statuses[device.persistent_id]}
               onLabelChange={(label) => updateDeviceLabel(device.persistent_id, label)}
               onDuplexModeChange={(mode) => handleSetDuplexMode(device, mode)}
+              onWriteLabel={() => handleWriteLabel(device, getDeviceLabel(device))}
             />
           ))}
         </div>
@@ -156,6 +167,7 @@ interface DeckLinkDeviceCardProps {
   status?: DeckLinkStatus;
   onLabelChange: (label: string) => void;
   onDuplexModeChange: (mode: string) => void;
+  onWriteLabel: () => void;
 }
 
 function DeckLinkDeviceCard({
@@ -164,6 +176,7 @@ function DeckLinkDeviceCard({
   status,
   onLabelChange,
   onDuplexModeChange,
+  onWriteLabel,
 }: DeckLinkDeviceCardProps) {
   return (
     <div className="decklink-card">
@@ -185,13 +198,22 @@ function DeckLinkDeviceCard({
           <label className="block text-sm text-[var(--color-text-secondary)] mb-1">
             Label
           </label>
-          <input
-            type="text"
-            value={label}
-            onChange={(e) => onLabelChange(e.target.value)}
-            placeholder="e.g., Graphics Fill"
-            className="w-full text-sm"
-          />
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={label}
+              onChange={(e) => onLabelChange(e.target.value)}
+              placeholder="e.g., Graphics Fill"
+              className="flex-1 text-sm"
+            />
+            <button
+              onClick={onWriteLabel}
+              title="Write this label to the card's NVRAM (persists across reboots, visible to Desktop Video and CasparCG)"
+              className="px-2 py-1 text-xs bg-[var(--color-bg-tertiary)] rounded hover:bg-[var(--color-border)] whitespace-nowrap"
+            >
+              ⤓ To device
+            </button>
+          </div>
         </div>
 
         {/* Duplex Mode */}

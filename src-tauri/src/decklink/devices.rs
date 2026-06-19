@@ -161,6 +161,7 @@ mod ffi {
         pub fn decklink_get_device_info(index: i32, info: *mut DeckLinkDeviceInfo) -> i32;
         pub fn decklink_get_api_version(version: *mut c_char, max_length: i32) -> i32;
         pub fn decklink_get_device_status(index: i32, status: *mut DeckLinkStatusInfo) -> i32;
+        pub fn decklink_set_device_label(index: i32, label: *const c_char) -> i32;
     }
 
     /// Convert a C string buffer to a Rust String
@@ -528,4 +529,32 @@ pub fn get_device_status(_index: u32) -> Result<DeckLinkStatus, DeckLinkError> {
         reference_display_mode: None,
         reference_type: None,
     })
+}
+
+/// Write a persistent device label to the card's NVRAM, identified by its
+/// persistent ID. Survives reboots and is visible to Desktop Video and CasparCG.
+#[cfg(feature = "decklink")]
+pub fn set_device_label(persistent_id: &str, label: &str) -> Result<(), DeckLinkError> {
+    let device = get_device_by_id(persistent_id)?;
+    let zero_based = device.index.saturating_sub(1) as i32;
+    let c_label = std::ffi::CString::new(label)
+        .map_err(|_| DeckLinkError::ConfigError("label contains a null byte".to_string()))?;
+
+    unsafe {
+        let result = ffi::decklink_set_device_label(zero_based, c_label.as_ptr());
+        match result {
+            ffi::DECKLINK_OK => Ok(()),
+            ffi::DECKLINK_ERROR_NO_DRIVER => Err(DeckLinkError::NoDriver),
+            _ => Err(DeckLinkError::ConfigError(format!(
+                "Failed to write device label (error {})",
+                result
+            ))),
+        }
+    }
+}
+
+#[cfg(not(feature = "decklink"))]
+pub fn set_device_label(_persistent_id: &str, _label: &str) -> Result<(), DeckLinkError> {
+    // No-op for development without the SDK
+    Ok(())
 }
