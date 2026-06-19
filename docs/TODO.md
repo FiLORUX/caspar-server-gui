@@ -19,11 +19,16 @@
 
 ## In Progress
 
-- [ ] Integrate DeckLink SDK for Windows builds
-  - [ ] Copy SDK headers to `src-tauri/sdk/decklink/`
-  - [ ] Create C wrapper for COM API
-  - [ ] Configure `build.rs` for Windows compilation
-  - [ ] Update Rust bindings to use real SDK
+- [x] Integrate DeckLink SDK for Windows builds — **hardware-verified 2026-06-19**
+  against a DeckLink SDI Micro (see `docs/DECKLINK-HARDWARE-VERIFICATION.md`)
+  - [x] Copy SDK headers to `src-tauri/sdk/decklink/`
+  - [x] Create C wrapper for COM API
+  - [x] Configure `build.rs` for Windows compilation (MIDL + `cc`, incl. `DeckLinkAPI_i.c`)
+  - [x] Update Rust bindings to use real SDK
+  - [x] Per-thread COM apartment for deterministic enumeration under tokio
+  - [x] Runtime driver/API version read (was hardcoded to the SDK constant)
+  - [ ] Duplex get/set against real hardware (`IDeckLinkProfileManager`) — Duo/Quad only
+  - [ ] Write device label to card NVRAM (`IDeckLinkConfiguration::SetString`)
 
 ## Pending
 
@@ -98,6 +103,11 @@ Integrate the `test/key-fill-identifier.html` test pattern into the GUI for one-
 2. **XML parser incomplete** — Currently parses basic structure; needs full consumer type support
 
 3. **AMCP client blocking** — Should add timeout handling for unresponsive servers
+
+4. **Test pattern is fill-only on single-output cards** — the DeckLink SDI Micro has no
+   keyer and one SDI out, so key/fill verification shows the composite or fill/key
+   singly. True external key/fill needs a keyer-capable card or two paired devices
+   (`key_device` + `keyer = external_separate_device`). See the hardware verification doc.
 
 ## Technical Debt
 
