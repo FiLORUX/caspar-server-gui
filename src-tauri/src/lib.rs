@@ -17,6 +17,11 @@ use config::{
 };
 use decklink::{DeckLinkDevice, DuplexMode};
 
+// Public re-exports for hardware-in-the-loop tests and external tooling. These
+// expose the same enumeration path the Tauri commands use, without making the
+// whole module public.
+pub use decklink::{get_api_version as decklink_api_version, list_devices as enumerate_decklink_devices};
+
 /// Application state shared across commands
 pub struct AppState {
     pub amcp_client: Arc<Mutex<amcp::AmcpClient>>,
@@ -262,13 +267,13 @@ async fn start_test_server(
         // Development: use project root test/ directory
         let mut path = std::env::current_dir()
             .map_err(|e| format!("Failed to get current directory: {}", e))?;
-        path.push("test");
+        path.push("key-fill-identifier");
         if !path.exists() {
             // Try parent directory (in case running from src-tauri)
             path = std::env::current_dir()
                 .map_err(|e| format!("Failed to get current directory: {}", e))?;
             path.pop();
-            path.push("test");
+            path.push("key-fill-identifier");
         }
         path
     } else {
@@ -276,7 +281,7 @@ async fn start_test_server(
         app.path()
             .resource_dir()
             .map_err(|e| format!("Failed to get resource directory: {}", e))?
-            .join("test")
+            .join("key-fill-identifier")
     };
 
     http_server::start_server(state.test_server.clone(), port, test_dir).await

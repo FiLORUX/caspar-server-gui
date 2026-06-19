@@ -160,7 +160,7 @@ pub async fn get_server_url(state: TestServerState) -> Option<String> {
 /// Get the URL for the key/fill identifier template
 pub fn get_test_pattern_url(base_url: &str, channel: u32, mode: &str) -> String {
     format!(
-        "{}/key-fill-identifier.html?mode={}&id={}",
+        "{}/index.html?mode={}&id={}",
         base_url, mode, channel
     )
 }
@@ -172,6 +172,6 @@ mod tests {
     #[test]
     fn test_pattern_url() {
         let url = get_test_pattern_url("http://127.0.0.1:9966", 1, "fill");
-        assert_eq!(url, "http://127.0.0.1:9966/key-fill-identifier.html?mode=fill&id=1");
+        assert_eq!(url, "http://127.0.0.1:9966/index.html?mode=fill&id=1");
     }
 }

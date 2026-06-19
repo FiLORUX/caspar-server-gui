@@ -32,11 +32,11 @@ impl AmcpClient {
     ) -> Result<(), AmcpError> {
         // Build URLs for fill and key modes
         let fill_url = format!(
-            "[HTML] {}/key-fill-identifier.html?mode=fill&id={}",
+            "[HTML] {}/index.html?mode=fill&id={}",
             test_server_url, channel
         );
         let key_url = format!(
-            "[HTML] {}/key-fill-identifier.html?mode=key&id={}",
+            "[HTML] {}/index.html?mode=key&id={}",
             test_server_url, channel
         );
 
