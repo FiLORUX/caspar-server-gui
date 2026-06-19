@@ -6,6 +6,7 @@ mod config;
 mod decklink;
 mod http_server;
 mod system;
+mod tsl;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,6 +31,7 @@ pub struct AppState {
     pub amcp_client: Arc<Mutex<amcp::AmcpClient>>,
     pub gui_settings: Arc<Mutex<GuiSettings>>,
     pub test_server: http_server::TestServerState,
+    pub tsl_monitor: tsl::TslState,
 }
 
 impl Default for AppState {
@@ -38,6 +40,7 @@ impl Default for AppState {
             amcp_client: Arc::new(Mutex::new(amcp::AmcpClient::new())),
             gui_settings: Arc::new(Mutex::new(GuiSettings::load())),
             test_server: http_server::create_test_server_state(),
+            tsl_monitor: tsl::create_tsl_state(),
         }
     }
 }
@@ -375,6 +378,39 @@ async fn stop_all_channel_tests(
 }
 
 // ============================================================================
+// TSL UMD Tally Monitor Commands
+// ============================================================================
+
+/// Start the TSL 3.1 UMD listener on the given UDP port (default 8900)
+#[tauri::command]
+async fn start_tsl_monitor(
+    port: Option<u16>,
+    state: tauri::State<'_, AppState>,
+) -> Result<u16, String> {
+    tsl::start_monitor(state.tsl_monitor.clone(), port).await
+}
+
+/// Stop the TSL UMD listener
+#[tauri::command]
+async fn stop_tsl_monitor(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    tsl::stop_monitor(state.tsl_monitor.clone()).await
+}
+
+/// Get the current TSL UMD displays (latest message per address)
+#[tauri::command]
+async fn get_tsl_displays(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<tsl::TslDisplay>, String> {
+    Ok(tsl::snapshot(state.tsl_monitor.clone()).await)
+}
+
+/// Get the TSL UMD listener port, or null if it is not running
+#[tauri::command]
+async fn tsl_monitor_port(state: tauri::State<'_, AppState>) -> Result<Option<u16>, String> {
+    Ok(tsl::monitor_port(state.tsl_monitor.clone()).await)
+}
+
+// ============================================================================
 // System Info Commands
 // ============================================================================
 
@@ -542,6 +578,11 @@ pub fn run() {
             stop_channel_test,
             test_all_channels,
             stop_all_channel_tests,
+            // TSL UMD monitor commands
+            start_tsl_monitor,
+            stop_tsl_monitor,
+            get_tsl_displays,
+            tsl_monitor_port,
             // System info commands
             get_ndi_version,
             get_scanner_version,

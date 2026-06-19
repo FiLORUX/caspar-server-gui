@@ -9,6 +9,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'channels', label: 'Channels' },
   { id: 'decklink', label: 'DeckLink' },
   { id: 'system', label: 'System Info' },
+  { id: 'tsl', label: 'TSL Tally' },
 ];
 
 export function TabBar() {
@@ -21,7 +22,7 @@ export function TabBar() {
           key={tab.id}
           className={`tab-button ${activeTab === tab.id ? 'active' : ''}`}
           onClick={() => setActiveTab(tab.id)}
-          disabled={!currentConfig && tab.id !== 'system'}
+          disabled={!currentConfig && tab.id !== 'system' && tab.id !== 'tsl'}
         >
           {tab.label}
         </button>

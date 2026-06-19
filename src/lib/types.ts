@@ -238,6 +238,13 @@ export interface DeckLinkStatus {
   reference_type: string | null;
 }
 
+export interface TslDisplay {
+  address: number;
+  tally: [boolean, boolean, boolean, boolean];
+  brightness: number;
+  label: string;
+}
+
 // ============================================================================
 // System Info
 // ============================================================================
@@ -263,7 +270,7 @@ export interface AmcpResponse {
 // UI State
 // ============================================================================
 
-export type TabId = 'paths' | 'channels' | 'decklink' | 'system';
+export type TabId = 'paths' | 'channels' | 'decklink' | 'system' | 'tsl';
 
 export interface ConnectionStatus {
   connected: boolean;
