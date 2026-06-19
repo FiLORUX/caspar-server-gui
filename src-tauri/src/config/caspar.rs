@@ -14,6 +14,11 @@ pub fn parse_caspar_xml(xml: &str) -> Result<CasparConfig, CasparXmlError> {
     reader.config_mut().trim_text(true);
 
     let mut config = CasparConfig::default();
+    // CasparConfig::default() seeds one placeholder channel. Clear it so parsed
+    // channels are not appended to that phantom default — otherwise a document
+    // with N channels yields N + 1. The empty-channels fallback at the end of
+    // this function restores a single default when a document has none.
+    config.channels.clear();
     let mut buf = Vec::new();
 
     // Track current parsing context
@@ -558,5 +563,93 @@ mod tests {
 
         assert_eq!(original.channels.len(), parsed.channels.len());
         assert_eq!(original.controllers.tcp.port, parsed.controllers.tcp.port);
+    }
+
+    #[test]
+    fn test_parse_multiple_channels() {
+        // Two channels must parse as two — the regression that the phantom
+        // default channel previously turned into three.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+    <channels>
+        <channel><video-mode>1080i5000</video-mode></channel>
+        <channel><video-mode>720p5000</video-mode></channel>
+    </channels>
+</configuration>"#;
+
+        let config = parse_caspar_xml(xml).expect("Failed to parse XML");
+        assert_eq!(config.channels.len(), 2);
+        assert_eq!(config.channels[0].video_mode, VideoMode::I1080_5000);
+        assert_eq!(config.channels[1].video_mode, VideoMode::P720_5000);
+    }
+
+    #[test]
+    fn test_parse_empty_channels_falls_back_to_default() {
+        // A document with no channels still yields one usable default channel.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+    <paths><media-path>/m/</media-path></paths>
+</configuration>"#;
+
+        let config = parse_caspar_xml(xml).expect("Failed to parse XML");
+        assert_eq!(config.channels.len(), 1);
+    }
+
+    #[test]
+    fn test_roundtrip_preserves_consumers_and_paths() {
+        let original = CasparConfig {
+            paths: Paths {
+                media: "/srv/media/".to_string(),
+                template: "/srv/templates/".to_string(),
+                ..Paths::default()
+            },
+            channels: vec![Channel {
+                video_mode: VideoMode::P1080_5000,
+                consumers: vec![
+                    Consumer::DeckLink(DeckLinkConsumer {
+                        device: 2,
+                        key_device: Some(3),
+                        embedded_audio: true,
+                        latency: DeckLinkLatency::Low,
+                        keyer: DeckLinkKeyer::ExternalSeparateDevice,
+                        key_only: Some(true),
+                    }),
+                    Consumer::Ndi(NdiConsumer {
+                        name: "Studio".to_string(),
+                        allow_fields: false,
+                    }),
+                ],
+            }],
+            ..CasparConfig::default()
+        };
+
+        let xml = generate_caspar_xml(&original).expect("generate");
+        let parsed = parse_caspar_xml(&xml).expect("parse");
+
+        assert_eq!(parsed.channels.len(), 1);
+        assert_eq!(parsed.paths.media, "/srv/media/");
+        assert_eq!(parsed.paths.template, "/srv/templates/");
+
+        let ch = &parsed.channels[0];
+        assert_eq!(ch.video_mode, VideoMode::P1080_5000);
+        assert_eq!(ch.consumers.len(), 2);
+
+        match &ch.consumers[0] {
+            Consumer::DeckLink(dl) => {
+                assert_eq!(dl.device, 2);
+                assert_eq!(dl.key_device, Some(3));
+                assert_eq!(dl.latency, DeckLinkLatency::Low);
+                assert_eq!(dl.keyer, DeckLinkKeyer::ExternalSeparateDevice);
+                assert_eq!(dl.key_only, Some(true));
+            }
+            other => panic!("expected a decklink consumer, got {other:?}"),
+        }
+        match &ch.consumers[1] {
+            Consumer::Ndi(ndi) => {
+                assert_eq!(ndi.name, "Studio");
+                assert!(!ndi.allow_fields);
+            }
+            other => panic!("expected an ndi consumer, got {other:?}"),
+        }
     }
 }
