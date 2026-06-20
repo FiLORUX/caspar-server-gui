@@ -32,6 +32,8 @@ pub struct AppState {
     pub gui_settings: Arc<Mutex<GuiSettings>>,
     pub test_server: http_server::TestServerState,
     pub tsl_monitor: tsl::TslState,
+    /// The launched CasparCG server process, if running
+    pub caspar_process: Arc<Mutex<Option<std::process::Child>>>,
 }
 
 impl Default for AppState {
@@ -41,6 +43,7 @@ impl Default for AppState {
             gui_settings: Arc::new(Mutex::new(GuiSettings::load())),
             test_server: http_server::create_test_server_state(),
             tsl_monitor: tsl::create_tsl_state(),
+            caspar_process: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -411,6 +414,93 @@ async fn tsl_monitor_port(state: tauri::State<'_, AppState>) -> Result<Option<u1
 }
 
 // ============================================================================
+// CasparCG Server Process Commands
+// ============================================================================
+
+/// Write the active configuration to casparcg.config and launch casparcg.exe
+/// from the configured installation directory.
+#[tauri::command]
+async fn start_caspar_server(
+    config: GlobalConfig,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    // Already running? (Reap a process that has since exited.)
+    {
+        let mut proc = state.caspar_process.lock().await;
+        match proc.as_mut().map(|c| c.try_wait()) {
+            Some(Ok(None)) => return Err("CasparCG server is already running".to_string()),
+            Some(_) => *proc = None,
+            None => {}
+        }
+    }
+
+    // Resolve the installation directory and executable.
+    let caspar_path = {
+        let settings = state.gui_settings.lock().await;
+        settings
+            .caspar_path
+            .clone()
+            .ok_or_else(|| "CasparCG path is not set — complete setup first".to_string())?
+    };
+    let dir = PathBuf::from(&caspar_path);
+    let exe = dir.join("casparcg.exe");
+    if !exe.exists() {
+        return Err(format!("casparcg.exe not found in {}", dir.display()));
+    }
+
+    // Write the active configuration so the server starts with what is shown.
+    let xml = generate_caspar_xml(&config.caspar)
+        .map_err(|e| format!("Failed to generate config: {}", e))?;
+    std::fs::write(dir.join("casparcg.config"), xml)
+        .map_err(|e| format!("Failed to write casparcg.config: {}", e))?;
+
+    // Launch with its own console window so the operator sees the live server log.
+    let mut command = std::process::Command::new(&exe);
+    command.current_dir(&dir);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        command.creation_flags(CREATE_NEW_CONSOLE);
+    }
+    let child = command
+        .spawn()
+        .map_err(|e| format!("Failed to launch CasparCG: {}", e))?;
+
+    *state.caspar_process.lock().await = Some(child);
+    Ok(())
+}
+
+/// Stop the launched CasparCG server process.
+#[tauri::command]
+async fn stop_caspar_server(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let mut proc = state.caspar_process.lock().await;
+    if let Some(mut child) = proc.take() {
+        child
+            .kill()
+            .map_err(|e| format!("Failed to stop server: {}", e))?;
+        let _ = child.wait();
+        Ok(())
+    } else {
+        Err("CasparCG server is not running".to_string())
+    }
+}
+
+/// Whether the launched CasparCG server process is still running.
+#[tauri::command]
+async fn caspar_server_running(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    let mut proc = state.caspar_process.lock().await;
+    match proc.as_mut().map(|c| c.try_wait()) {
+        Some(Ok(None)) => Ok(true),
+        Some(_) => {
+            *proc = None;
+            Ok(false)
+        }
+        None => Ok(false),
+    }
+}
+
+// ============================================================================
 // System Info Commands
 // ============================================================================
 
@@ -583,6 +673,10 @@ pub fn run() {
             stop_tsl_monitor,
             get_tsl_displays,
             tsl_monitor_port,
+            // CasparCG server process commands
+            start_caspar_server,
+            stop_caspar_server,
+            caspar_server_running,
             // System info commands
             get_ndi_version,
             get_scanner_version,

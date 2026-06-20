@@ -190,6 +190,22 @@ export async function tslMonitorPort(): Promise<number | null> {
 }
 
 // ============================================================================
+// CasparCG Server Process Commands
+// ============================================================================
+
+export async function startCasparServer(config: GlobalConfig): Promise<void> {
+  return invoke('start_caspar_server', { config });
+}
+
+export async function stopCasparServer(): Promise<void> {
+  return invoke('stop_caspar_server');
+}
+
+export async function casparServerRunning(): Promise<boolean> {
+  return invoke('caspar_server_running');
+}
+
+// ============================================================================
 // GUI Settings Commands
 // ============================================================================
 
