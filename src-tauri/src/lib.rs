@@ -417,6 +417,37 @@ async fn tsl_monitor_port(state: tauri::State<'_, AppState>) -> Result<Option<u1
 // CasparCG Server Process Commands
 // ============================================================================
 
+/// Terminate a process and its whole child tree (CEF/scanner subprocesses).
+fn kill_process_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
+    }
+}
+
+/// Terminate any stray casparcg.exe a previous session left running, so it cannot
+/// keep holding the DeckLink card or the AMCP port.
+fn kill_stale_casparcg() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/IM", "casparcg.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+}
+
 /// Write the active configuration to casparcg.config and launch casparcg.exe
 /// from the configured installation directory.
 #[tauri::command]
@@ -434,6 +465,11 @@ async fn start_caspar_server(
             None => {}
         }
     }
+
+    // Clean slate: terminate any stray casparcg.exe a previous session left
+    // behind. Otherwise it keeps the DeckLink card and AMCP port, and the new
+    // instance fails with "Could not enable primary video output".
+    kill_stale_casparcg();
 
     // Resolve the installation directory and executable.
     let caspar_path = {
@@ -517,9 +553,9 @@ enum StdStream {
 async fn stop_caspar_server(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut proc = state.caspar_process.lock().await;
     if let Some(mut child) = proc.take() {
-        child
-            .kill()
-            .map_err(|e| format!("Failed to stop server: {}", e))?;
+        // Kill the whole tree, not just the direct child — CasparCG spawns CEF
+        // subprocesses that would otherwise survive and keep holding the card.
+        kill_process_tree(child.id());
         let _ = child.wait();
         Ok(())
     } else {
@@ -731,6 +767,21 @@ pub fn run() {
             pick_config_file,
             pick_save_location,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // When the GUI exits, kill the launched server and its tree so no
+            // casparcg.exe is left holding the DeckLink card.
+            if let tauri::RunEvent::Exit = event {
+                let process = app_handle.state::<AppState>().caspar_process.clone();
+                let pid = process
+                    .try_lock()
+                    .ok()
+                    .and_then(|mut guard| guard.take())
+                    .map(|child| child.id());
+                if let Some(pid) = pid {
+                    kill_process_tree(pid);
+                }
+            }
+        });
 }
