@@ -9,6 +9,7 @@ import { SystemInfoPanel } from './components/SystemInfoPanel';
 import { StatusBar } from './components/StatusBar';
 import { SetupWizard } from './components/SetupWizard';
 import { ServerPanel } from './components/ServerPanel';
+import { PreviewPanel } from './components/PreviewPanel';
 
 function App() {
   const { activeTab, settings, initialise } = useAppStore();
@@ -51,6 +52,7 @@ function App() {
             {activeTab === 'server' && <ServerPanel />}
             {activeTab === 'paths' && <PathsPanel />}
             {activeTab === 'channels' && <ChannelsPanel />}
+            {activeTab === 'preview' && <PreviewPanel />}
             {activeTab === 'decklink' && <DeckLinkPanel />}
             {activeTab === 'system' && <SystemInfoPanel />}
           </div>

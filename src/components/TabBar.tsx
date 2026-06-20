@@ -8,6 +8,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'server', label: 'Server' },
   { id: 'paths', label: 'Paths' },
   { id: 'channels', label: 'Channels' },
+  { id: 'preview', label: 'Preview' },
   { id: 'decklink', label: 'DeckLink' },
   { id: 'system', label: 'System Info' },
   { id: 'tsl', label: 'TSL Tally' },
@@ -23,7 +24,13 @@ export function TabBar() {
           key={tab.id}
           className={`tab-button ${activeTab === tab.id ? 'active' : ''}`}
           onClick={() => setActiveTab(tab.id)}
-          disabled={!currentConfig && tab.id !== 'system' && tab.id !== 'tsl' && tab.id !== 'server'}
+          disabled={
+            !currentConfig &&
+            tab.id !== 'system' &&
+            tab.id !== 'tsl' &&
+            tab.id !== 'server' &&
+            tab.id !== 'preview'
+          }
         >
           {tab.label}
         </button>

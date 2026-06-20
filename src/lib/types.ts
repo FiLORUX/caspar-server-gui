@@ -270,7 +270,7 @@ export interface AmcpResponse {
 // UI State
 // ============================================================================
 
-export type TabId = 'server' | 'paths' | 'channels' | 'decklink' | 'system' | 'tsl';
+export type TabId = 'server' | 'paths' | 'channels' | 'preview' | 'decklink' | 'system' | 'tsl';
 
 export interface ConnectionStatus {
   connected: boolean;
