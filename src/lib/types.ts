@@ -284,10 +284,10 @@ export interface ConnectionStatus {
 // ============================================================================
 
 export const DEFAULT_PATHS: Paths = {
-  media: '',
-  template: '',
-  log: '',
-  data: '',
+  media: 'media/',
+  template: 'template/',
+  log: 'log/',
+  data: 'data/',
 };
 
 export const DEFAULT_CHANNEL: Channel = {

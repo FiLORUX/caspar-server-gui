@@ -313,7 +313,7 @@ impl Default for Channel {
 }
 
 /// Path configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Paths {
     #[serde(default)]
     pub media: String,
@@ -325,6 +325,22 @@ pub struct Paths {
     pub data: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
+}
+
+impl Default for Paths {
+    fn default() -> Self {
+        // CasparCG resolves relative paths against its own directory and fails
+        // to start if a path is empty (env::resolve_or_create on "" throws
+        // "Failed to create directory"). Mirror CasparCG's own conventional
+        // defaults so a fresh profile always produces a config it will accept.
+        Self {
+            media: "media/".to_string(),
+            template: "template/".to_string(),
+            log: "log/".to_string(),
+            data: "data/".to_string(),
+            font: None,
+        }
+    }
 }
 
 /// TCP controller configuration

@@ -202,14 +202,27 @@ pub fn generate_caspar_xml(config: &CasparConfig) -> Result<String, CasparXmlErr
     // Root element
     writer.write_event(Event::Start(BytesStart::new("configuration")))?;
 
-    // Paths section
+    // Paths section. Empty path elements are omitted: CasparCG throws
+    // "Failed to create directory" when it resolves an empty path, so an unset
+    // path must fall through to CasparCG's own built-in default rather than be
+    // written as an empty element.
     writer.write_event(Event::Start(BytesStart::new("paths")))?;
-    write_element(&mut writer, "media-path", &config.paths.media)?;
-    write_element(&mut writer, "template-path", &config.paths.template)?;
-    write_element(&mut writer, "log-path", &config.paths.log)?;
-    write_element(&mut writer, "data-path", &config.paths.data)?;
+    if !config.paths.media.is_empty() {
+        write_element(&mut writer, "media-path", &config.paths.media)?;
+    }
+    if !config.paths.template.is_empty() {
+        write_element(&mut writer, "template-path", &config.paths.template)?;
+    }
+    if !config.paths.log.is_empty() {
+        write_element(&mut writer, "log-path", &config.paths.log)?;
+    }
+    if !config.paths.data.is_empty() {
+        write_element(&mut writer, "data-path", &config.paths.data)?;
+    }
     if let Some(ref font) = config.paths.font {
-        write_element(&mut writer, "font-path", font)?;
+        if !font.is_empty() {
+            write_element(&mut writer, "font-path", font)?;
+        }
     }
     writer.write_event(Event::End(BytesEnd::new("paths")))?;
 
