@@ -10,7 +10,7 @@ mod tsl;
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
 
 use config::{
@@ -423,6 +423,7 @@ async fn tsl_monitor_port(state: tauri::State<'_, AppState>) -> Result<Option<u1
 async fn start_caspar_server(
     config: GlobalConfig,
     state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     // Already running? (Reap a process that has since exited.)
     {
@@ -454,21 +455,61 @@ async fn start_caspar_server(
     std::fs::write(dir.join("casparcg.config"), xml)
         .map_err(|e| format!("Failed to write casparcg.config: {}", e))?;
 
-    // Launch with its own console window so the operator sees the live server log.
+    // Capture the server's console output and stream it into the GUI as
+    // `caspar-log` events instead of opening a separate console window — this is
+    // the embedded live log the classic launcher (CasparLauncher) is built around.
     let mut command = std::process::Command::new(&exe);
-    command.current_dir(&dir);
+    command
+        .current_dir(&dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-        command.creation_flags(CREATE_NEW_CONSOLE);
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
     }
-    let child = command
+    let mut child = command
         .spawn()
         .map_err(|e| format!("Failed to launch CasparCG: {}", e))?;
 
+    // Forward each output line to the front end. Blocking reads run on their own
+    // threads so the async runtime is never stalled; they end at EOF when the
+    // process exits.
+    for stream in [
+        child.stdout.take().map(StdStream::Out),
+        child.stderr.take().map(StdStream::Err),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            match stream {
+                StdStream::Out(out) => {
+                    for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
+                        let _ = app.emit("caspar-log", line);
+                    }
+                }
+                StdStream::Err(err) => {
+                    for line in std::io::BufReader::new(err).lines().map_while(Result::ok) {
+                        let _ = app.emit("caspar-log", line);
+                    }
+                }
+            }
+        });
+    }
+
+    let _ = app.emit("caspar-log", format!("[launcher] started {}", exe.display()));
     *state.caspar_process.lock().await = Some(child);
     Ok(())
+}
+
+/// Helper to thread either child stream through one spawn loop.
+enum StdStream {
+    Out(std::process::ChildStdout),
+    Err(std::process::ChildStderr),
 }
 
 /// Stop the launched CasparCG server process.

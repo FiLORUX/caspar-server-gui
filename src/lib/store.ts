@@ -64,7 +64,7 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set, get) => ({
   // UI State
-  activeTab: 'paths',
+  activeTab: 'server',
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   // Profile State

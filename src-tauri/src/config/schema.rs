@@ -440,7 +440,12 @@ impl Default for CasparConfig {
     fn default() -> Self {
         Self {
             paths: Paths::default(),
-            channels: vec![Channel::default()],
+            // A server with a channel but no output consumer produces nothing, so
+            // seed one usable channel with a DeckLink fill consumer on device 1.
+            channels: vec![Channel {
+                video_mode: VideoMode::default(),
+                consumers: vec![Consumer::DeckLink(DeckLinkConsumer::default())],
+            }],
             controllers: Controllers::default(),
             amcp: AmcpConfig::default(),
             log_level: None,

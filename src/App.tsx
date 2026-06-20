@@ -8,6 +8,7 @@ import { DeckLinkPanel } from './components/DeckLinkPanel';
 import { SystemInfoPanel } from './components/SystemInfoPanel';
 import { StatusBar } from './components/StatusBar';
 import { SetupWizard } from './components/SetupWizard';
+import { ServerPanel } from './components/ServerPanel';
 
 function App() {
   const { activeTab, settings, initialise } = useAppStore();
@@ -47,6 +48,7 @@ function App() {
 
           {/* Active panel content */}
           <div className="flex-1 overflow-auto p-4">
+            {activeTab === 'server' && <ServerPanel />}
             {activeTab === 'paths' && <PathsPanel />}
             {activeTab === 'channels' && <ChannelsPanel />}
             {activeTab === 'decklink' && <DeckLinkPanel />}
