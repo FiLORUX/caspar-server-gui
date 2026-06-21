@@ -30,3 +30,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 axum = "0.8"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
+
+[dev-dependencies]
+# ServiceExt::oneshot lets the test drive the router without binding a port.
+tower = { version = "0.5", features = ["util"] }

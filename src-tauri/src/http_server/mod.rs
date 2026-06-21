@@ -86,9 +86,13 @@ pub async fn start_server(
         .allow_methods(Any)
         .allow_headers(Any);
 
-    // Serve static files from test directory
+    // Serve static files from the test directory at the root. axum disallows
+    // nesting a service at "/" (it panics, which silently hangs the command that
+    // builds this router), so use fallback_service — the documented way to serve
+    // a ServeDir at the root with the request path intact (so GET /index.html
+    // resolves to <test_dir>/index.html).
     let app = Router::new()
-        .nest_service("/", ServeDir::new(&test_dir))
+        .fallback_service(ServeDir::new(&test_dir))
         .layer(cors);
 
     // Try the preferred port, then fallback to random
@@ -173,5 +177,40 @@ mod tests {
     fn test_pattern_url() {
         let url = get_test_pattern_url("http://127.0.0.1:9966", 1, "fill");
         assert_eq!(url, "http://127.0.0.1:9966/index.html?mode=fill&id=1");
+    }
+
+    // Regression: the router must serve <test_dir>/index.html at GET /index.html.
+    // The previous nest_service("/") form panicked when the router was built
+    // (axum forbids nesting at the root), which hung the start command and left
+    // the preview stuck on "Starting preview server…". fallback_service serves it
+    // with the request path intact. Driven via oneshot — no port binding.
+    #[test]
+    fn serves_index_html_at_root() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let dir = std::env::temp_dir().join(format!("caspar-http-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("index.html"), b"<html>identifier</html>").unwrap();
+
+        let app = Router::new().fallback_service(ServeDir::new(&dir));
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let status = rt.block_on(async {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/index.html")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            response.status()
+        });
+
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(status, StatusCode::OK);
     }
 }
