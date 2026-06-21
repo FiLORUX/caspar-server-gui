@@ -273,29 +273,44 @@ async fn start_test_server(
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<u16, String> {
-    // Determine the test directory path
-    // In development, it's relative to the project root
-    // In production, it's bundled with the app resources
-    let test_dir = if cfg!(debug_assertions) {
-        // Development: use project root test/ directory
-        let mut path = std::env::current_dir()
-            .map_err(|e| format!("Failed to get current directory: {}", e))?;
-        path.push("key-fill-identifier");
-        if !path.exists() {
-            // Try parent directory (in case running from src-tauri)
-            path = std::env::current_dir()
-                .map_err(|e| format!("Failed to get current directory: {}", e))?;
-            path.pop();
-            path.push("key-fill-identifier");
+    // Locate the bundled key-fill-identifier assets. Tauri rewrites the "../" in
+    // a resource path to "_up_", so in an installed build the folder is at
+    // <resource_dir>/_up_/key-fill-identifier, not directly under the resource
+    // dir. Probe every plausible location (resources, next to the exe, dev tree)
+    // and pick the first that actually contains index.html.
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(res) = app.path().resource_dir() {
+        candidates.push(res.join("_up_").join("key-fill-identifier"));
+        candidates.push(res.join("key-fill-identifier"));
+        candidates.push(res);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("key-fill-identifier"));
+            candidates.push(dir.join("resources").join("key-fill-identifier"));
         }
-        path
-    } else {
-        // Production: use bundled resources
-        app.path()
-            .resource_dir()
-            .map_err(|e| format!("Failed to get resource directory: {}", e))?
-            .join("key-fill-identifier")
-    };
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("key-fill-identifier"));
+        if let Some(parent) = cwd.parent() {
+            candidates.push(parent.join("key-fill-identifier"));
+        }
+    }
+
+    let test_dir = candidates
+        .iter()
+        .find(|p| p.join("index.html").exists())
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "key-fill-identifier assets not found. Tried: {}",
+                candidates
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
+        })?;
 
     http_server::start_server(state.test_server.clone(), port, test_dir).await
 }
