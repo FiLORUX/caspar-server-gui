@@ -1,8 +1,9 @@
 // Status bar component
 // Shows connection status and system information
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppStore } from '../lib/store';
+import * as tauri from '../lib/tauri';
 
 export function StatusBar() {
   const {
@@ -11,12 +12,58 @@ export function StatusBar() {
     disconnect,
     systemVersions,
     deckLinkDevices,
+    currentConfig,
   } = useAppStore();
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const [host, setHost] = useState('localhost');
   const [port, setPort] = useState('5250');
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [serverRunning, setServerRunning] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  // Poll whether the launched CasparCG server process is alive.
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const running = await tauri.casparServerRunning();
+        if (!cancelled) setServerRunning(running);
+      } catch {
+        /* ignore */
+      }
+    };
+    poll();
+    const id = setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  const handleStartServer = async () => {
+    setServerError(null);
+    if (!currentConfig) {
+      setServerError('Select a profile first');
+      return;
+    }
+    try {
+      await tauri.startCasparServer(currentConfig);
+      setServerRunning(true);
+    } catch (err) {
+      setServerError(String(err));
+      alert(`Failed to start CasparCG: ${err}`);
+    }
+  };
+
+  const handleStopServer = async () => {
+    try {
+      await tauri.stopCasparServer();
+    } catch {
+      /* ignore */
+    }
+    setServerRunning(false);
+  };
 
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,6 +92,38 @@ export function StatusBar() {
   return (
     <>
       <div className="flex items-center h-8 px-4 bg-[var(--color-bg-secondary)] border-t border-[var(--color-border)] text-xs">
+        {/* Start / Stop the CasparCG server process */}
+        <div className="flex items-center gap-2 mr-4">
+          {serverRunning ? (
+            <button
+              onClick={handleStopServer}
+              className="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              ■ Stop Server
+            </button>
+          ) : (
+            <button
+              onClick={handleStartServer}
+              disabled={!currentConfig}
+              title={
+                !currentConfig
+                  ? 'Select a profile first'
+                  : 'Write config and launch casparcg.exe'
+              }
+              className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+            >
+              ▶ Start Server
+            </button>
+          )}
+          {serverError && (
+            <span className="text-red-400" title={serverError}>
+              ⚠
+            </span>
+          )}
+        </div>
+
+        <div className="w-px h-4 bg-[var(--color-border)] mx-2" />
+
         {/* Server status */}
         <div className="flex items-center gap-2 mr-6">
           <span className={`status-dot ${connection.connected ? 'connected' : 'disconnected'}`} />

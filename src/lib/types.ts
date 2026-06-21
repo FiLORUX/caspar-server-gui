@@ -134,6 +134,13 @@ export interface Paths {
 export interface Channel {
   video_mode: VideoMode;
   consumers: Consumer[];
+  /**
+   * Stable client-side identifier for React keys. Not part of the CasparCG
+   * config — the Rust layer ignores it on load and omits it on save — it only
+   * keeps per-channel UI state attached to the right card when channels are
+   * added or removed. Regenerated on load via ensureChannelIds().
+   */
+  id?: string;
 }
 
 export interface TcpController {
@@ -221,13 +228,28 @@ export interface DeckLinkDevice {
   device_label?: string;
   supports_duplex: boolean;
   duplex_mode?: string;
-  sdi_inputs: number;
-  sdi_outputs: number;
+  input_connectors: string[];
+  output_connectors: string[];
   supports_internal_keying: boolean;
   supports_external_keying: boolean;
   supports_capture: boolean;
   supports_playback: boolean;
   max_audio_channels: number;
+}
+
+export interface DeckLinkStatus {
+  input_signal_locked: boolean;
+  input_display_mode: string | null;
+  reference_signal_locked: boolean;
+  reference_display_mode: string | null;
+  reference_type: string | null;
+}
+
+export interface TslDisplay {
+  address: number;
+  tally: [boolean, boolean, boolean, boolean];
+  brightness: number;
+  label: string;
 }
 
 // ============================================================================
@@ -255,7 +277,7 @@ export interface AmcpResponse {
 // UI State
 // ============================================================================
 
-export type TabId = 'paths' | 'channels' | 'decklink' | 'system';
+export type TabId = 'server' | 'paths' | 'channels' | 'preview' | 'decklink' | 'system' | 'tsl';
 
 export interface ConnectionStatus {
   connected: boolean;
@@ -269,10 +291,10 @@ export interface ConnectionStatus {
 // ============================================================================
 
 export const DEFAULT_PATHS: Paths = {
-  media: '',
-  template: '',
-  log: '',
-  data: '',
+  media: 'media/',
+  template: 'template/',
+  log: 'log/',
+  data: 'data/',
 };
 
 export const DEFAULT_CHANNEL: Channel = {
@@ -307,7 +329,7 @@ export function createDefaultDeckLinkConsumer(): DeckLinkConsumer {
     device: 1,
     embedded_audio: true,
     latency: 'normal',
-    keyer: 'external',
+    keyer: 'default',
   };
 }
 
@@ -332,5 +354,55 @@ export function createDefaultScreenConsumer(): ScreenConsumer {
 export function createDefaultSystemAudioConsumer(): SystemAudioConsumer {
   return {
     type: 'system-audio',
+  };
+}
+
+// ============================================================================
+// Smart profile seeding
+// ============================================================================
+
+/** Assign a stable id to any channel missing one (e.g. freshly loaded profiles). */
+export function ensureChannelIds(config: GlobalConfig): GlobalConfig {
+  let changed = false;
+  const channels = config.caspar.channels.map((ch) => {
+    if (ch.id) return ch;
+    changed = true;
+    return { ...ch, id: crypto.randomUUID() };
+  });
+  return changed ? { ...config, caspar: { ...config.caspar, channels } } : config;
+}
+
+/** Record a detected card in the profile's DeckLink section (self-documenting). */
+export function deviceConfigFromHardware(d: DeckLinkDevice): DeckLinkDeviceConfig {
+  return {
+    persistent_id: d.persistent_id,
+    model_name: d.model_name,
+    label: d.device_label || undefined,
+    duplex_mode: d.duplex_mode || undefined,
+  };
+}
+
+/**
+ * Make a freshly created profile valid and runnable from the start: record the
+ * detected hardware and seed the first channel with a single DeckLink consumer
+ * on the first card, with plain-fill keying (the only mode every card supports).
+ * With no card detected the profile is left empty for the user to configure.
+ */
+export function applyNewProfileDefaults(
+  config: GlobalConfig,
+  devices: DeckLinkDevice[],
+): GlobalConfig {
+  if (devices.length === 0) return config;
+
+  const consumer = createDefaultDeckLinkConsumer();
+  consumer.device = devices[0].index;
+
+  const channels = config.caspar.channels.length > 0 ? [...config.caspar.channels] : [{ ...DEFAULT_CHANNEL }];
+  channels[0] = { ...channels[0], consumers: [consumer] };
+
+  return {
+    ...config,
+    caspar: { ...config.caspar, channels },
+    decklink: { devices: devices.map(deviceConfigFromHardware) },
   };
 }

@@ -1,12 +1,46 @@
 // DeckLink configuration panel
 // Shows installed DeckLink devices and allows configuration
 
+import { useEffect, useState } from 'react';
 import { useAppStore } from '../lib/store';
 import * as tauri from '../lib/tauri';
-import type { DeckLinkDevice } from '../lib/types';
+import type { DeckLinkDevice, DeckLinkStatus } from '../lib/types';
 
 export function DeckLinkPanel() {
   const { deckLinkDevices, loadDeckLinkDevices, currentConfig, updateConfig } = useAppStore();
+  const [statuses, setStatuses] = useState<Record<string, DeckLinkStatus>>({});
+
+  // Poll live signal status (~2 s). IDeckLinkStatus is passive, so this does not
+  // disturb capture/playback; it just reflects input/reference lock in the UI.
+  useEffect(() => {
+    if (deckLinkDevices.length === 0) return;
+    let cancelled = false;
+    const poll = async () => {
+      const entries = await Promise.all(
+        deckLinkDevices.map(async (d) => {
+          try {
+            return [d.persistent_id, await tauri.getDeckLinkStatus(d.index)] as const;
+          } catch {
+            return null;
+          }
+        })
+      );
+      if (cancelled) return;
+      setStatuses((prev) => {
+        const next = { ...prev };
+        for (const entry of entries) {
+          if (entry) next[entry[0]] = entry[1];
+        }
+        return next;
+      });
+    };
+    poll();
+    const id = setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [deckLinkDevices]);
 
   const handleRefresh = async () => {
     await loadDeckLinkDevices();
@@ -19,6 +53,16 @@ export function DeckLinkPanel() {
     } catch (error) {
       console.error('Failed to set duplex mode:', error);
       alert(`Failed to set duplex mode: ${error}`);
+    }
+  };
+
+  const handleWriteLabel = async (device: DeckLinkDevice, label: string) => {
+    try {
+      await tauri.setDeckLinkLabel(device.persistent_id, label);
+      await loadDeckLinkDevices();
+    } catch (error) {
+      console.error('Failed to write label to device:', error);
+      alert(`Failed to write label to device: ${error}`);
     }
   };
 
@@ -99,8 +143,10 @@ export function DeckLinkPanel() {
               key={device.persistent_id}
               device={device}
               label={getDeviceLabel(device)}
+              status={statuses[device.persistent_id]}
               onLabelChange={(label) => updateDeviceLabel(device.persistent_id, label)}
               onDuplexModeChange={(mode) => handleSetDuplexMode(device, mode)}
+              onWriteLabel={() => handleWriteLabel(device, getDeviceLabel(device))}
             />
           ))}
         </div>
@@ -118,15 +164,19 @@ export function DeckLinkPanel() {
 interface DeckLinkDeviceCardProps {
   device: DeckLinkDevice;
   label: string;
+  status?: DeckLinkStatus;
   onLabelChange: (label: string) => void;
   onDuplexModeChange: (mode: string) => void;
+  onWriteLabel: () => void;
 }
 
 function DeckLinkDeviceCard({
   device,
   label,
+  status,
   onLabelChange,
   onDuplexModeChange,
+  onWriteLabel,
 }: DeckLinkDeviceCardProps) {
   return (
     <div className="decklink-card">
@@ -148,13 +198,22 @@ function DeckLinkDeviceCard({
           <label className="block text-sm text-[var(--color-text-secondary)] mb-1">
             Label
           </label>
-          <input
-            type="text"
-            value={label}
-            onChange={(e) => onLabelChange(e.target.value)}
-            placeholder="e.g., Graphics Fill"
-            className="w-full text-sm"
-          />
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={label}
+              onChange={(e) => onLabelChange(e.target.value)}
+              placeholder="e.g., Graphics Fill"
+              className="flex-1 text-sm"
+            />
+            <button
+              onClick={onWriteLabel}
+              title="Write this label to the card's NVRAM (persists across reboots, visible to Desktop Video and CasparCG)"
+              className="px-2 py-1 text-xs bg-[var(--color-bg-tertiary)] rounded hover:bg-[var(--color-border)] whitespace-nowrap"
+            >
+              ⤓ To device
+            </button>
+          </div>
         </div>
 
         {/* Duplex Mode */}
@@ -177,14 +236,14 @@ function DeckLinkDeviceCard({
 
       {/* Capabilities */}
       <div className="mt-4 flex flex-wrap gap-2">
-        {device.sdi_inputs > 0 && (
+        {device.input_connectors.length > 0 && (
           <span className="px-2 py-1 text-xs bg-[var(--color-bg-primary)] rounded">
-            {device.sdi_inputs} SDI Input{device.sdi_inputs > 1 ? 's' : ''}
+            In: {device.input_connectors.join(', ')}
           </span>
         )}
-        {device.sdi_outputs > 0 && (
+        {device.output_connectors.length > 0 && (
           <span className="px-2 py-1 text-xs bg-[var(--color-bg-primary)] rounded">
-            {device.sdi_outputs} SDI Output{device.sdi_outputs > 1 ? 's' : ''}
+            Out: {device.output_connectors.join(', ')}
           </span>
         )}
         {device.supports_internal_keying && (
@@ -198,6 +257,35 @@ function DeckLinkDeviceCard({
           </span>
         )}
       </div>
+
+      {/* Live signal status (IDeckLinkStatus, polled) */}
+      {status && (
+        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+          <span
+            className={`px-2 py-1 rounded ${
+              status.input_signal_locked
+                ? 'bg-emerald-600/20 text-emerald-400'
+                : 'bg-[var(--color-bg-primary)] text-[var(--color-text-muted)]'
+            }`}
+          >
+            Input: {status.input_signal_locked ? status.input_display_mode ?? 'locked' : 'no signal'}
+          </span>
+          <span
+            className={`px-2 py-1 rounded ${
+              status.reference_signal_locked
+                ? 'bg-emerald-600/20 text-emerald-400'
+                : 'bg-[var(--color-bg-primary)] text-[var(--color-text-muted)]'
+            }`}
+          >
+            Ref:{' '}
+            {status.reference_signal_locked
+              ? `${status.reference_display_mode ?? 'locked'}${
+                  status.reference_type ? ` (${status.reference_type})` : ''
+                }`
+              : 'none'}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import type {
   SystemVersions,
   TabId,
 } from './types';
+import { applyNewProfileDefaults, ensureChannelIds } from './types';
 import * as tauri from './tauri';
 
 interface AppState {
@@ -64,7 +65,7 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set, get) => ({
   // UI State
-  activeTab: 'paths',
+  activeTab: 'server',
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   // Profile State
@@ -90,7 +91,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const path = `${settings.caspar_path}/caspar-gui-profiles/${name}.json`;
       const config = await tauri.loadGlobalConfig(path);
-      set({ activeProfile: name, currentConfig: config, configDirty: false });
+      set({ activeProfile: name, currentConfig: ensureChannelIds(config), configDirty: false });
     } catch (error) {
       console.error('Failed to load profile:', error);
     }
@@ -111,11 +112,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createProfile: async (name) => {
-    const { settings, loadProfiles } = get();
+    const { settings, loadProfiles, deckLinkDevices } = get();
     if (!settings?.caspar_path) return;
 
     try {
-      const config = await tauri.createDefaultConfig(name);
+      const base = await tauri.createDefaultConfig(name);
+      // Seed the profile from detected hardware so it is valid and runnable
+      // straight away, rather than an empty shell the user must wire up.
+      const config = ensureChannelIds(applyNewProfileDefaults(base, deckLinkDevices));
       const path = `${settings.caspar_path}/caspar-gui-profiles/${name}.json`;
       await tauri.saveGlobalConfig(path, config);
       await loadProfiles();

@@ -6,9 +6,11 @@ import type {
   AmcpResponse,
   CasparConfig,
   DeckLinkDevice,
+  DeckLinkStatus,
   GlobalConfig,
   GuiSettings,
   SystemVersions,
+  TslDisplay,
 } from './types';
 
 // ============================================================================
@@ -79,6 +81,10 @@ export async function setDeckLinkDuplexMode(
 
 export async function getDeckLinkDriverVersion(): Promise<string | null> {
   return invoke('get_decklink_driver_version');
+}
+
+export async function getDeckLinkStatus(index: number): Promise<DeckLinkStatus> {
+  return invoke('get_decklink_status', { index });
 }
 
 // ============================================================================
@@ -161,6 +167,42 @@ export async function getScannerVersion(
 
 export async function getSystemVersions(): Promise<SystemVersions> {
   return invoke('get_system_versions');
+}
+
+// ============================================================================
+// TSL UMD Tally Monitor Commands
+// ============================================================================
+
+export async function startTslMonitor(port?: number): Promise<number> {
+  return invoke('start_tsl_monitor', { port });
+}
+
+export async function stopTslMonitor(): Promise<void> {
+  return invoke('stop_tsl_monitor');
+}
+
+export async function getTslDisplays(): Promise<TslDisplay[]> {
+  return invoke('get_tsl_displays');
+}
+
+export async function tslMonitorPort(): Promise<number | null> {
+  return invoke('tsl_monitor_port');
+}
+
+// ============================================================================
+// CasparCG Server Process Commands
+// ============================================================================
+
+export async function startCasparServer(config: GlobalConfig): Promise<void> {
+  return invoke('start_caspar_server', { config });
+}
+
+export async function stopCasparServer(): Promise<void> {
+  return invoke('stop_caspar_server');
+}
+
+export async function casparServerRunning(): Promise<boolean> {
+  return invoke('caspar_server_running');
 }
 
 // ============================================================================

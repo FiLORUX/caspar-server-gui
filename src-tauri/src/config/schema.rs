@@ -174,10 +174,13 @@ pub enum DeckLinkLatency {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DeckLinkKeyer {
-    #[default]
     External,
     ExternalSeparateDevice,
     Internal,
+    // CasparCG treats an omitted keyer as "default" (plain fill output, no
+    // keying). That is the only mode every card supports, so it is the safe
+    // default — cards without a keyer (e.g. the SDI Micro) reject "external".
+    #[default]
     Default,
 }
 
@@ -313,7 +316,7 @@ impl Default for Channel {
 }
 
 /// Path configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Paths {
     #[serde(default)]
     pub media: String,
@@ -325,6 +328,22 @@ pub struct Paths {
     pub data: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
+}
+
+impl Default for Paths {
+    fn default() -> Self {
+        // CasparCG resolves relative paths against its own directory and fails
+        // to start if a path is empty (env::resolve_or_create on "" throws
+        // "Failed to create directory"). Mirror CasparCG's own conventional
+        // defaults so a fresh profile always produces a config it will accept.
+        Self {
+            media: "media/".to_string(),
+            template: "template/".to_string(),
+            log: "log/".to_string(),
+            data: "data/".to_string(),
+            font: None,
+        }
+    }
 }
 
 /// TCP controller configuration
@@ -424,7 +443,12 @@ impl Default for CasparConfig {
     fn default() -> Self {
         Self {
             paths: Paths::default(),
-            channels: vec![Channel::default()],
+            // A server with a channel but no output consumer produces nothing, so
+            // seed one usable channel with a DeckLink fill consumer on device 1.
+            channels: vec![Channel {
+                video_mode: VideoMode::default(),
+                consumers: vec![Consumer::DeckLink(DeckLinkConsumer::default())],
+            }],
             controllers: Controllers::default(),
             amcp: AmcpConfig::default(),
             log_level: None,

@@ -34,6 +34,6 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../test": "test"
+      "../key-fill-identifier": "key-fill-identifier"
     }
   }}

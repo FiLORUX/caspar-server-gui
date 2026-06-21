@@ -29,6 +29,10 @@ fn build_decklink_wrapper() {
         cc::Build::new()
             .cpp(true)
             .file(wrapper_dir.join("decklink_wrapper.cpp"))
+            // The MIDL-generated interface file carries the IID_*/CLSID_* GUID
+            // definitions the wrapper references (CLSID_CDeckLinkIterator etc.).
+            // Without compiling it, linking fails with unresolved externals.
+            .file(out_dir.join("DeckLinkAPI_i.c"))
             .include(&include_dir)
             .include(&out_dir) // For generated headers from MIDL
             .include(&wrapper_dir)

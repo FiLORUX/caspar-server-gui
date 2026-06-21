@@ -6,22 +6,34 @@ mod config;
 mod decklink;
 mod http_server;
 mod system;
+mod tsl;
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
 
 use config::{
     generate_caspar_xml, parse_caspar_xml, CasparConfig, GlobalConfig, GuiSettings,
 };
-use decklink::{DeckLinkDevice, DuplexMode};
+use decklink::{DeckLinkDevice, DeckLinkStatus, DuplexMode};
+
+// Public re-exports for hardware-in-the-loop tests and external tooling. These
+// expose the same enumeration path the Tauri commands use, without making the
+// whole module public.
+pub use decklink::{
+    get_api_version as decklink_api_version, get_device_status as decklink_device_status,
+    list_devices as enumerate_decklink_devices, set_device_label as set_decklink_device_label,
+};
 
 /// Application state shared across commands
 pub struct AppState {
     pub amcp_client: Arc<Mutex<amcp::AmcpClient>>,
     pub gui_settings: Arc<Mutex<GuiSettings>>,
     pub test_server: http_server::TestServerState,
+    pub tsl_monitor: tsl::TslState,
+    /// The launched CasparCG server process, if running
+    pub caspar_process: Arc<Mutex<Option<std::process::Child>>>,
 }
 
 impl Default for AppState {
@@ -30,6 +42,8 @@ impl Default for AppState {
             amcp_client: Arc::new(Mutex::new(amcp::AmcpClient::new())),
             gui_settings: Arc::new(Mutex::new(GuiSettings::load())),
             test_server: http_server::create_test_server_state(),
+            tsl_monitor: tsl::create_tsl_state(),
+            caspar_process: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -134,15 +148,13 @@ async fn get_decklink_info(persistent_id: String) -> Result<DeckLinkDevice, Stri
     decklink::get_device_by_id(&persistent_id).map_err(|e| e.to_string())
 }
 
-/// Set the display label for a DeckLink device
+/// Write a persistent display label to the DeckLink device's NVRAM
 #[tauri::command]
 async fn set_decklink_label(
-    _persistent_id: String,
-    _label: String,
+    persistent_id: String,
+    label: String,
 ) -> Result<(), String> {
-    // Note: DeckLink SDK doesn't support persistent labels
-    // This would be stored in our global config instead
-    Ok(())
+    decklink::set_device_label(&persistent_id, &label).map_err(|e| e.to_string())
 }
 
 /// Set the duplex mode for a DeckLink device
@@ -159,6 +171,12 @@ async fn set_decklink_duplex_mode(
 #[tauri::command]
 async fn get_decklink_driver_version() -> Result<Option<String>, String> {
     decklink::get_driver_version().map_err(|e| e.to_string())
+}
+
+/// Get live signal status for a DeckLink device (by 1-based device index)
+#[tauri::command]
+async fn get_decklink_status(index: u32) -> Result<DeckLinkStatus, String> {
+    decklink::get_device_status(index).map_err(|e| e.to_string())
 }
 
 // ============================================================================
@@ -255,29 +273,44 @@ async fn start_test_server(
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<u16, String> {
-    // Determine the test directory path
-    // In development, it's relative to the project root
-    // In production, it's bundled with the app resources
-    let test_dir = if cfg!(debug_assertions) {
-        // Development: use project root test/ directory
-        let mut path = std::env::current_dir()
-            .map_err(|e| format!("Failed to get current directory: {}", e))?;
-        path.push("test");
-        if !path.exists() {
-            // Try parent directory (in case running from src-tauri)
-            path = std::env::current_dir()
-                .map_err(|e| format!("Failed to get current directory: {}", e))?;
-            path.pop();
-            path.push("test");
+    // Locate the bundled key-fill-identifier assets. Tauri rewrites the "../" in
+    // a resource path to "_up_", so in an installed build the folder is at
+    // <resource_dir>/_up_/key-fill-identifier, not directly under the resource
+    // dir. Probe every plausible location (resources, next to the exe, dev tree)
+    // and pick the first that actually contains index.html.
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(res) = app.path().resource_dir() {
+        candidates.push(res.join("_up_").join("key-fill-identifier"));
+        candidates.push(res.join("key-fill-identifier"));
+        candidates.push(res);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("key-fill-identifier"));
+            candidates.push(dir.join("resources").join("key-fill-identifier"));
         }
-        path
-    } else {
-        // Production: use bundled resources
-        app.path()
-            .resource_dir()
-            .map_err(|e| format!("Failed to get resource directory: {}", e))?
-            .join("test")
-    };
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("key-fill-identifier"));
+        if let Some(parent) = cwd.parent() {
+            candidates.push(parent.join("key-fill-identifier"));
+        }
+    }
+
+    let test_dir = candidates
+        .iter()
+        .find(|p| p.join("index.html").exists())
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "key-fill-identifier assets not found. Tried: {}",
+                candidates
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
+        })?;
 
     http_server::start_server(state.test_server.clone(), port, test_dir).await
 }
@@ -360,6 +393,203 @@ async fn stop_all_channel_tests(
         .stop_all_channel_tests(channel_count)
         .await
         .map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// TSL UMD Tally Monitor Commands
+// ============================================================================
+
+/// Start the TSL 3.1 UMD listener on the given UDP port (default 8900)
+#[tauri::command]
+async fn start_tsl_monitor(
+    port: Option<u16>,
+    state: tauri::State<'_, AppState>,
+) -> Result<u16, String> {
+    tsl::start_monitor(state.tsl_monitor.clone(), port).await
+}
+
+/// Stop the TSL UMD listener
+#[tauri::command]
+async fn stop_tsl_monitor(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    tsl::stop_monitor(state.tsl_monitor.clone()).await
+}
+
+/// Get the current TSL UMD displays (latest message per address)
+#[tauri::command]
+async fn get_tsl_displays(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<tsl::TslDisplay>, String> {
+    Ok(tsl::snapshot(state.tsl_monitor.clone()).await)
+}
+
+/// Get the TSL UMD listener port, or null if it is not running
+#[tauri::command]
+async fn tsl_monitor_port(state: tauri::State<'_, AppState>) -> Result<Option<u16>, String> {
+    Ok(tsl::monitor_port(state.tsl_monitor.clone()).await)
+}
+
+// ============================================================================
+// CasparCG Server Process Commands
+// ============================================================================
+
+/// Terminate a process and its whole child tree (CEF/scanner subprocesses).
+fn kill_process_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
+    }
+}
+
+/// Terminate any stray casparcg.exe a previous session left running, so it cannot
+/// keep holding the DeckLink card or the AMCP port.
+fn kill_stale_casparcg() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/IM", "casparcg.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+}
+
+/// Write the active configuration to casparcg.config and launch casparcg.exe
+/// from the configured installation directory.
+#[tauri::command]
+async fn start_caspar_server(
+    config: GlobalConfig,
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    // Already running? (Reap a process that has since exited.)
+    {
+        let mut proc = state.caspar_process.lock().await;
+        match proc.as_mut().map(|c| c.try_wait()) {
+            Some(Ok(None)) => return Err("CasparCG server is already running".to_string()),
+            Some(_) => *proc = None,
+            None => {}
+        }
+    }
+
+    // Clean slate: terminate any stray casparcg.exe a previous session left
+    // behind. Otherwise it keeps the DeckLink card and AMCP port, and the new
+    // instance fails with "Could not enable primary video output".
+    kill_stale_casparcg();
+
+    // Resolve the installation directory and executable.
+    let caspar_path = {
+        let settings = state.gui_settings.lock().await;
+        settings
+            .caspar_path
+            .clone()
+            .ok_or_else(|| "CasparCG path is not set — complete setup first".to_string())?
+    };
+    let dir = PathBuf::from(&caspar_path);
+    let exe = dir.join("casparcg.exe");
+    if !exe.exists() {
+        return Err(format!("casparcg.exe not found in {}", dir.display()));
+    }
+
+    // Write the active configuration so the server starts with what is shown.
+    let xml = generate_caspar_xml(&config.caspar)
+        .map_err(|e| format!("Failed to generate config: {}", e))?;
+    std::fs::write(dir.join("casparcg.config"), xml)
+        .map_err(|e| format!("Failed to write casparcg.config: {}", e))?;
+
+    // Capture the server's console output and stream it into the GUI as
+    // `caspar-log` events instead of opening a separate console window — this is
+    // the embedded live log the classic launcher (CasparLauncher) is built around.
+    let mut command = std::process::Command::new(&exe);
+    command
+        .current_dir(&dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Failed to launch CasparCG: {}", e))?;
+
+    // Forward each output line to the front end. Blocking reads run on their own
+    // threads so the async runtime is never stalled; they end at EOF when the
+    // process exits.
+    for stream in [
+        child.stdout.take().map(StdStream::Out),
+        child.stderr.take().map(StdStream::Err),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            match stream {
+                StdStream::Out(out) => {
+                    for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
+                        let _ = app.emit("caspar-log", line);
+                    }
+                }
+                StdStream::Err(err) => {
+                    for line in std::io::BufReader::new(err).lines().map_while(Result::ok) {
+                        let _ = app.emit("caspar-log", line);
+                    }
+                }
+            }
+        });
+    }
+
+    let _ = app.emit("caspar-log", format!("[launcher] started {}", exe.display()));
+    *state.caspar_process.lock().await = Some(child);
+    Ok(())
+}
+
+/// Helper to thread either child stream through one spawn loop.
+enum StdStream {
+    Out(std::process::ChildStdout),
+    Err(std::process::ChildStderr),
+}
+
+/// Stop the launched CasparCG server process.
+#[tauri::command]
+async fn stop_caspar_server(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let mut proc = state.caspar_process.lock().await;
+    if let Some(mut child) = proc.take() {
+        // Kill the whole tree, not just the direct child — CasparCG spawns CEF
+        // subprocesses that would otherwise survive and keep holding the card.
+        kill_process_tree(child.id());
+        let _ = child.wait();
+        Ok(())
+    } else {
+        Err("CasparCG server is not running".to_string())
+    }
+}
+
+/// Whether the launched CasparCG server process is still running.
+#[tauri::command]
+async fn caspar_server_running(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    let mut proc = state.caspar_process.lock().await;
+    match proc.as_mut().map(|c| c.try_wait()) {
+        Some(Ok(None)) => Ok(true),
+        Some(_) => {
+            *proc = None;
+            Ok(false)
+        }
+        None => Ok(false),
+    }
 }
 
 // ============================================================================
@@ -513,6 +743,7 @@ pub fn run() {
             set_decklink_label,
             set_decklink_duplex_mode,
             get_decklink_driver_version,
+            get_decklink_status,
             // AMCP commands
             amcp_connect,
             amcp_disconnect,
@@ -529,6 +760,15 @@ pub fn run() {
             stop_channel_test,
             test_all_channels,
             stop_all_channel_tests,
+            // TSL UMD monitor commands
+            start_tsl_monitor,
+            stop_tsl_monitor,
+            get_tsl_displays,
+            tsl_monitor_port,
+            // CasparCG server process commands
+            start_caspar_server,
+            stop_caspar_server,
+            caspar_server_running,
             // System info commands
             get_ndi_version,
             get_scanner_version,
@@ -542,6 +782,21 @@ pub fn run() {
             pick_config_file,
             pick_save_location,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // When the GUI exits, kill the launched server and its tree so no
+            // casparcg.exe is left holding the DeckLink card.
+            if let tauri::RunEvent::Exit = event {
+                let process = app_handle.state::<AppState>().caspar_process.clone();
+                let pid = process
+                    .try_lock()
+                    .ok()
+                    .and_then(|mut guard| guard.take())
+                    .map(|child| child.id());
+                if let Some(pid) = pid {
+                    kill_process_tree(pid);
+                }
+            }
+        });
 }

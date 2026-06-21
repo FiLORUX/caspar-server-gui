@@ -14,6 +14,11 @@ pub fn parse_caspar_xml(xml: &str) -> Result<CasparConfig, CasparXmlError> {
     reader.config_mut().trim_text(true);
 
     let mut config = CasparConfig::default();
+    // CasparConfig::default() seeds one placeholder channel. Clear it so parsed
+    // channels are not appended to that phantom default — otherwise a document
+    // with N channels yields N + 1. The empty-channels fallback at the end of
+    // this function restores a single default when a document has none.
+    config.channels.clear();
     let mut buf = Vec::new();
 
     // Track current parsing context
@@ -197,14 +202,19 @@ pub fn generate_caspar_xml(config: &CasparConfig) -> Result<String, CasparXmlErr
     // Root element
     writer.write_event(Event::Start(BytesStart::new("configuration")))?;
 
-    // Paths section
+    // Paths section. CasparCG requires each of these nodes to exist (a missing
+    // one throws "No such node (log-path)") and to be non-empty (an empty one
+    // throws "Failed to create directory"). Always write them, substituting
+    // CasparCG's own conventional default when the value is unset.
     writer.write_event(Event::Start(BytesStart::new("paths")))?;
-    write_element(&mut writer, "media-path", &config.paths.media)?;
-    write_element(&mut writer, "template-path", &config.paths.template)?;
-    write_element(&mut writer, "log-path", &config.paths.log)?;
-    write_element(&mut writer, "data-path", &config.paths.data)?;
+    write_element(&mut writer, "media-path", non_empty_or(&config.paths.media, "media/"))?;
+    write_element(&mut writer, "template-path", non_empty_or(&config.paths.template, "template/"))?;
+    write_element(&mut writer, "log-path", non_empty_or(&config.paths.log, "log/"))?;
+    write_element(&mut writer, "data-path", non_empty_or(&config.paths.data, "data/"))?;
     if let Some(ref font) = config.paths.font {
-        write_element(&mut writer, "font-path", font)?;
+        if !font.trim().is_empty() {
+            write_element(&mut writer, "font-path", font)?;
+        }
     }
     writer.write_event(Event::End(BytesEnd::new("paths")))?;
 
@@ -264,6 +274,16 @@ pub fn generate_caspar_xml(config: &CasparConfig) -> Result<String, CasparXmlErr
 
     let result = writer.into_inner().into_inner();
     Ok(String::from_utf8(result)?)
+}
+
+/// Return the value if it has content, otherwise the CasparCG default. Path
+/// nodes must always be present and non-empty in casparcg.config.
+fn non_empty_or<'a>(value: &'a str, default: &'a str) -> &'a str {
+    if value.trim().is_empty() {
+        default
+    } else {
+        value
+    }
 }
 
 fn write_element<W: std::io::Write>(
@@ -451,10 +471,12 @@ fn apply_consumer_property(builder: &mut ConsumerBuilder, consumer_type: &str, e
                     _ => DeckLinkLatency::Normal,
                 },
                 "keyer" => dl.keyer = match value {
+                    "external" => DeckLinkKeyer::External,
                     "external_separate_device" => DeckLinkKeyer::ExternalSeparateDevice,
                     "internal" => DeckLinkKeyer::Internal,
-                    "default" => DeckLinkKeyer::Default,
-                    _ => DeckLinkKeyer::External,
+                    // Unknown/garbage values fall back to the safe plain-fill
+                    // mode rather than a keyer the card may not support.
+                    _ => DeckLinkKeyer::Default,
                 },
                 "key-only" => dl.key_only = Some(value == "true"),
                 _ => {}
@@ -558,5 +580,93 @@ mod tests {
 
         assert_eq!(original.channels.len(), parsed.channels.len());
         assert_eq!(original.controllers.tcp.port, parsed.controllers.tcp.port);
+    }
+
+    #[test]
+    fn test_parse_multiple_channels() {
+        // Two channels must parse as two — the regression that the phantom
+        // default channel previously turned into three.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+    <channels>
+        <channel><video-mode>1080i5000</video-mode></channel>
+        <channel><video-mode>720p5000</video-mode></channel>
+    </channels>
+</configuration>"#;
+
+        let config = parse_caspar_xml(xml).expect("Failed to parse XML");
+        assert_eq!(config.channels.len(), 2);
+        assert_eq!(config.channels[0].video_mode, VideoMode::I1080_5000);
+        assert_eq!(config.channels[1].video_mode, VideoMode::P720_5000);
+    }
+
+    #[test]
+    fn test_parse_empty_channels_falls_back_to_default() {
+        // A document with no channels still yields one usable default channel.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+    <paths><media-path>/m/</media-path></paths>
+</configuration>"#;
+
+        let config = parse_caspar_xml(xml).expect("Failed to parse XML");
+        assert_eq!(config.channels.len(), 1);
+    }
+
+    #[test]
+    fn test_roundtrip_preserves_consumers_and_paths() {
+        let original = CasparConfig {
+            paths: Paths {
+                media: "/srv/media/".to_string(),
+                template: "/srv/templates/".to_string(),
+                ..Paths::default()
+            },
+            channels: vec![Channel {
+                video_mode: VideoMode::P1080_5000,
+                consumers: vec![
+                    Consumer::DeckLink(DeckLinkConsumer {
+                        device: 2,
+                        key_device: Some(3),
+                        embedded_audio: true,
+                        latency: DeckLinkLatency::Low,
+                        keyer: DeckLinkKeyer::ExternalSeparateDevice,
+                        key_only: Some(true),
+                    }),
+                    Consumer::Ndi(NdiConsumer {
+                        name: "Studio".to_string(),
+                        allow_fields: false,
+                    }),
+                ],
+            }],
+            ..CasparConfig::default()
+        };
+
+        let xml = generate_caspar_xml(&original).expect("generate");
+        let parsed = parse_caspar_xml(&xml).expect("parse");
+
+        assert_eq!(parsed.channels.len(), 1);
+        assert_eq!(parsed.paths.media, "/srv/media/");
+        assert_eq!(parsed.paths.template, "/srv/templates/");
+
+        let ch = &parsed.channels[0];
+        assert_eq!(ch.video_mode, VideoMode::P1080_5000);
+        assert_eq!(ch.consumers.len(), 2);
+
+        match &ch.consumers[0] {
+            Consumer::DeckLink(dl) => {
+                assert_eq!(dl.device, 2);
+                assert_eq!(dl.key_device, Some(3));
+                assert_eq!(dl.latency, DeckLinkLatency::Low);
+                assert_eq!(dl.keyer, DeckLinkKeyer::ExternalSeparateDevice);
+                assert_eq!(dl.key_only, Some(true));
+            }
+            other => panic!("expected a decklink consumer, got {other:?}"),
+        }
+        match &ch.consumers[1] {
+            Consumer::Ndi(ndi) => {
+                assert_eq!(ndi.name, "Studio");
+                assert!(!ndi.allow_fields);
+            }
+            other => panic!("expected an ndi consumer, got {other:?}"),
+        }
     }
 }

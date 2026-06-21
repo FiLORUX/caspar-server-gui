@@ -16,6 +16,11 @@
 // Include the generated DeckLink API header (from IDL via MIDL)
 #include "DeckLinkAPI_h.h"
 
+// The compile-time SDK version constant lives in its own plain header, which the
+// generated MIDL header does not pull in. Include it explicitly so the version
+// helper below resolves BLACKMAGIC_DECKLINK_API_VERSION_STRING.
+#include "DeckLinkAPIVersion.h"
+
 static bool g_initialised = false;
 
 /**
@@ -44,6 +49,58 @@ static void bstr_to_cstr(BSTR bstr, char* out, int max_length) {
     out[utf8len] = '\0';
 }
 
+/**
+ * Convert a four-character code (as stored big-endian in a BMDDisplayMode) into
+ * a printable C string, skipping any non-printable bytes. A zero code yields "".
+ */
+static void fourcc_to_cstr(uint32_t code, char* out, int max_length) {
+    if (out == nullptr || max_length <= 0) {
+        return;
+    }
+    int j = 0;
+    for (int shift = 24; shift >= 0 && j < max_length - 1; shift -= 8) {
+        char c = static_cast<char>((code >> shift) & 0xFF);
+        if (c >= 32 && c < 127) {
+            out[j++] = c;
+        }
+    }
+    out[j] = '\0';
+}
+
+// RAII guard that guarantees COM is initialised on the calling thread for the
+// duration of a single FFI call. Tauri dispatches each command on a tokio worker
+// thread, and COM apartments are per-thread — a one-shot global CoInitialize on
+// the first thread does not cover the others, so a later CoCreateInstance there
+// would fail with CO_E_NOTINITIALIZED. Balancing init/uninit per call keeps every
+// thread correct and the result deterministic regardless of which worker runs it.
+namespace {
+class ComApartment {
+public:
+    ComApartment() {
+        HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        // S_OK: we initialised it. S_FALSE: already initialised on this thread
+        // (refcount bumped) — both must be balanced with CoUninitialize.
+        // RPC_E_CHANGED_MODE: thread is already in another apartment (e.g. STA);
+        // COM is usable and must NOT be torn down by us.
+        ok_ = SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE;
+        balance_ = (hr == S_OK || hr == S_FALSE);
+    }
+    ~ComApartment() {
+        if (balance_) {
+            CoUninitialize();
+        }
+    }
+    bool ok() const { return ok_; }
+
+    ComApartment(const ComApartment&) = delete;
+    ComApartment& operator=(const ComApartment&) = delete;
+
+private:
+    bool ok_ = false;
+    bool balance_ = false;
+};
+} // namespace
+
 extern "C" {
 
 DeckLinkError decklink_init(void) {
@@ -68,15 +125,16 @@ void decklink_cleanup(void) {
 }
 
 DeckLinkError decklink_get_device_count(int32_t* count) {
-    if (!g_initialised) {
-        return DECKLINK_ERROR_NOT_INITIALISED;
-    }
-
     if (count == nullptr) {
         return DECKLINK_ERROR_INVALID_INDEX;
     }
 
     *count = 0;
+
+    ComApartment com;
+    if (!com.ok()) {
+        return DECKLINK_ERROR_COM_FAILED;
+    }
 
     IDeckLinkIterator* iterator = nullptr;
     HRESULT hr = CoCreateInstance(
@@ -106,10 +164,6 @@ DeckLinkError decklink_get_device_count(int32_t* count) {
 }
 
 DeckLinkError decklink_get_device_info(int32_t index, DeckLinkDeviceInfo* info) {
-    if (!g_initialised) {
-        return DECKLINK_ERROR_NOT_INITIALISED;
-    }
-
     if (info == nullptr || index < 0) {
         return DECKLINK_ERROR_INVALID_INDEX;
     }
@@ -119,6 +173,11 @@ DeckLinkError decklink_get_device_info(int32_t index, DeckLinkDeviceInfo* info) 
     info->index = index;
     info->persistent_id = -1;
     info->device_group_id = -1;
+
+    ComApartment com;
+    if (!com.ok()) {
+        return DECKLINK_ERROR_COM_FAILED;
+    }
 
     IDeckLinkIterator* iterator = nullptr;
     HRESULT hr = CoCreateInstance(
@@ -278,8 +337,39 @@ DeckLinkError decklink_get_api_version(char* version, int32_t max_length) {
     if (version == nullptr || max_length <= 0) {
         return DECKLINK_ERROR_INVALID_INDEX;
     }
+    version[0] = '\0';
 
-    // Use the version from the header
+    // Prefer the live version reported by the installed Desktop Video runtime.
+    // The compile-time SDK constant only tells us which headers we built against;
+    // it can differ from the driver actually loaded (observed: SDK 15.3 headers
+    // against a 16.0.1 runtime), so the runtime value is the one worth surfacing.
+    {
+        ComApartment com;
+        IDeckLinkAPIInformation* apiInfo = nullptr;
+        HRESULT hr = com.ok()
+            ? CoCreateInstance(
+                  CLSID_CDeckLinkAPIInformation,
+                  nullptr,
+                  CLSCTX_ALL,
+                  IID_IDeckLinkAPIInformation,
+                  reinterpret_cast<void**>(&apiInfo))
+            : E_FAIL;
+
+        if (SUCCEEDED(hr) && apiInfo) {
+            BSTR runtimeVersion = nullptr;
+            if (apiInfo->GetString(BMDDeckLinkAPIVersion, &runtimeVersion) == S_OK && runtimeVersion) {
+                bstr_to_cstr(runtimeVersion, version, max_length);
+                SysFreeString(runtimeVersion);
+            }
+            apiInfo->Release();
+
+            if (version[0] != '\0') {
+                return DECKLINK_OK;
+            }
+        }
+    }
+
+    // Fall back to the compile-time SDK version if the runtime query is unavailable.
     const char* api_version = BLACKMAGIC_DECKLINK_API_VERSION_STRING;
     int len = static_cast<int>(strlen(api_version));
     if (len >= max_length) {
@@ -289,6 +379,146 @@ DeckLinkError decklink_get_api_version(char* version, int32_t max_length) {
     version[len] = '\0';
 
     return DECKLINK_OK;
+}
+
+DeckLinkError decklink_get_device_status(int32_t index, DeckLinkStatusInfo* status) {
+    if (status == nullptr || index < 0) {
+        return DECKLINK_ERROR_INVALID_INDEX;
+    }
+
+    memset(status, 0, sizeof(DeckLinkStatusInfo));
+
+    ComApartment com;
+    if (!com.ok()) {
+        return DECKLINK_ERROR_COM_FAILED;
+    }
+
+    IDeckLinkIterator* iterator = nullptr;
+    HRESULT hr = CoCreateInstance(
+        CLSID_CDeckLinkIterator,
+        nullptr,
+        CLSCTX_ALL,
+        IID_IDeckLinkIterator,
+        reinterpret_cast<void**>(&iterator)
+    );
+
+    if (FAILED(hr) || iterator == nullptr) {
+        return DECKLINK_ERROR_NO_DRIVER;
+    }
+
+    IDeckLink* deckLink = nullptr;
+    int32_t currentIndex = 0;
+    DeckLinkError result = DECKLINK_ERROR_INVALID_INDEX;
+
+    while (iterator->Next(&deckLink) == S_OK) {
+        if (currentIndex == index) {
+            IDeckLinkStatus* deviceStatus = nullptr;
+            if (deckLink->QueryInterface(IID_IDeckLinkStatus, reinterpret_cast<void**>(&deviceStatus)) == S_OK && deviceStatus) {
+                // IDeckLinkStatus is a passive interface: it reports the current
+                // signal state without opening the input, so polling it is cheap.
+                BOOL inputLocked = FALSE;
+                if (deviceStatus->GetFlag(bmdDeckLinkStatusVideoInputSignalLocked, &inputLocked) == S_OK) {
+                    status->input_signal_locked = inputLocked != FALSE;
+                }
+
+                int64_t inputMode = 0;
+                if (deviceStatus->GetInt(bmdDeckLinkStatusCurrentVideoInputMode, &inputMode) == S_OK) {
+                    fourcc_to_cstr(static_cast<uint32_t>(inputMode), status->input_display_mode, sizeof(status->input_display_mode));
+                }
+
+                BOOL referenceLocked = FALSE;
+                if (deviceStatus->GetFlag(bmdDeckLinkStatusReferenceSignalLocked, &referenceLocked) == S_OK) {
+                    status->reference_signal_locked = referenceLocked != FALSE;
+                }
+
+                int64_t referenceMode = 0;
+                if (deviceStatus->GetInt(bmdDeckLinkStatusReferenceSignalMode, &referenceMode) == S_OK) {
+                    fourcc_to_cstr(static_cast<uint32_t>(referenceMode), status->reference_display_mode, sizeof(status->reference_display_mode));
+                }
+
+                deviceStatus->Release();
+                result = DECKLINK_OK;
+            } else {
+                result = DECKLINK_ERROR_QUERY_FAILED;
+            }
+
+            deckLink->Release();
+            break;
+        }
+
+        currentIndex++;
+        deckLink->Release();
+    }
+
+    iterator->Release();
+    return result;
+}
+
+DeckLinkError decklink_set_device_label(int32_t index, const char* label) {
+    if (label == nullptr || index < 0) {
+        return DECKLINK_ERROR_INVALID_INDEX;
+    }
+
+    ComApartment com;
+    if (!com.ok()) {
+        return DECKLINK_ERROR_COM_FAILED;
+    }
+
+    IDeckLinkIterator* iterator = nullptr;
+    HRESULT hr = CoCreateInstance(
+        CLSID_CDeckLinkIterator,
+        nullptr,
+        CLSCTX_ALL,
+        IID_IDeckLinkIterator,
+        reinterpret_cast<void**>(&iterator)
+    );
+
+    if (FAILED(hr) || iterator == nullptr) {
+        return DECKLINK_ERROR_NO_DRIVER;
+    }
+
+    IDeckLink* deckLink = nullptr;
+    int32_t currentIndex = 0;
+    DeckLinkError result = DECKLINK_ERROR_INVALID_INDEX;
+
+    while (iterator->Next(&deckLink) == S_OK) {
+        if (currentIndex == index) {
+            IDeckLinkConfiguration* config = nullptr;
+            if (deckLink->QueryInterface(IID_IDeckLinkConfiguration, reinterpret_cast<void**>(&config)) == S_OK && config) {
+                // Convert the UTF-8 label to a wide BSTR for the COM string setter.
+                int wlen = MultiByteToWideChar(CP_UTF8, 0, label, -1, nullptr, 0);
+                if (wlen > 0) {
+                    std::wstring wide(static_cast<size_t>(wlen), L'\0');
+                    MultiByteToWideChar(CP_UTF8, 0, label, -1, &wide[0], wlen);
+                    BSTR labelBstr = SysAllocString(wide.c_str());
+                    if (labelBstr != nullptr) {
+                        HRESULT setHr = config->SetString(bmdDeckLinkConfigDeviceInformationLabel, labelBstr);
+                        SysFreeString(labelBstr);
+                        // Commit to NVRAM so it persists and is visible to other apps.
+                        if (SUCCEEDED(setHr) && SUCCEEDED(config->WriteConfigurationToPreferences())) {
+                            result = DECKLINK_OK;
+                        } else {
+                            result = DECKLINK_ERROR_QUERY_FAILED;
+                        }
+                    } else {
+                        result = DECKLINK_ERROR_QUERY_FAILED;
+                    }
+                } else {
+                    result = DECKLINK_ERROR_QUERY_FAILED;
+                }
+                config->Release();
+            } else {
+                result = DECKLINK_ERROR_QUERY_FAILED;
+            }
+            deckLink->Release();
+            break;
+        }
+        currentIndex++;
+        deckLink->Release();
+    }
+
+    iterator->Release();
+    return result;
 }
 
 } // extern "C"
@@ -325,6 +555,20 @@ DeckLinkError decklink_get_api_version(char* version, int32_t max_length) {
         version[max_length - 1] = '\0';
     }
     return DECKLINK_OK;
+}
+
+DeckLinkError decklink_get_device_status(int32_t index, DeckLinkStatusInfo* status) {
+    (void)index;
+    if (status) {
+        memset(status, 0, sizeof(DeckLinkStatusInfo));
+    }
+    return DECKLINK_ERROR_NO_DRIVER;
+}
+
+DeckLinkError decklink_set_device_label(int32_t index, const char* label) {
+    (void)index;
+    (void)label;
+    return DECKLINK_ERROR_NO_DRIVER;
 }
 
 } // extern "C"
