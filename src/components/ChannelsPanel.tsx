@@ -452,7 +452,19 @@ function DeckLinkConsumerForm({ consumer, onUpdate, devices }: DeckLinkConsumerF
           onChange={(e) => onUpdate({ ...consumer, keyer: e.target.value as DeckLinkConsumer['keyer'] })}
           className="w-full text-sm"
         >
-          <option value="external">External</option>
+          <option value="default">Default (plain fill, no keying)</option>
+          <option
+            value="external"
+            disabled={selectedDevice ? !selectedDevice.supports_external_keying : false}
+          >
+            External
+            {selectedDevice && !selectedDevice.supports_external_keying
+              ? ' — not supported by this card'
+              : ''}
+          </option>
+          {/* External (Separate Device) uses two independent fill outputs — fill
+              on this device, key on the key-device — so it needs no hardware
+              keyer and is the fill+key route for cards without one. */}
           <option value="external_separate_device">External (Separate Device)</option>
           <option
             value="internal"
@@ -463,7 +475,6 @@ function DeckLinkConsumerForm({ consumer, onUpdate, devices }: DeckLinkConsumerF
               ? ' — not supported by this card'
               : ''}
           </option>
-          <option value="default">Default</option>
         </select>
       </div>
 
@@ -482,6 +493,13 @@ function DeckLinkConsumerForm({ consumer, onUpdate, devices }: DeckLinkConsumerF
             <span className="text-amber-400">
               {' '}
               · the selected Internal keyer is unavailable on this card
+            </span>
+          )}
+          {consumer.keyer === 'external' && !selectedDevice.supports_external_keying && (
+            <span className="text-amber-400">
+              {' '}
+              · the selected External keyer is unavailable on this card — use Default for plain fill,
+              or External (Separate Device) with a key device for fill+key
             </span>
           )}
         </div>

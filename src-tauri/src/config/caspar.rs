@@ -471,10 +471,12 @@ fn apply_consumer_property(builder: &mut ConsumerBuilder, consumer_type: &str, e
                     _ => DeckLinkLatency::Normal,
                 },
                 "keyer" => dl.keyer = match value {
+                    "external" => DeckLinkKeyer::External,
                     "external_separate_device" => DeckLinkKeyer::ExternalSeparateDevice,
                     "internal" => DeckLinkKeyer::Internal,
-                    "default" => DeckLinkKeyer::Default,
-                    _ => DeckLinkKeyer::External,
+                    // Unknown/garbage values fall back to the safe plain-fill
+                    // mode rather than a keyer the card may not support.
+                    _ => DeckLinkKeyer::Default,
                 },
                 "key-only" => dl.key_only = Some(value == "true"),
                 _ => {}

@@ -322,7 +322,7 @@ export function createDefaultDeckLinkConsumer(): DeckLinkConsumer {
     device: 1,
     embedded_audio: true,
     latency: 'normal',
-    keyer: 'external',
+    keyer: 'default',
   };
 }
 

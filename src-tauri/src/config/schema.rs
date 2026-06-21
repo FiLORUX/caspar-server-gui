@@ -174,10 +174,13 @@ pub enum DeckLinkLatency {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DeckLinkKeyer {
-    #[default]
     External,
     ExternalSeparateDevice,
     Internal,
+    // CasparCG treats an omitted keyer as "default" (plain fill output, no
+    // keying). That is the only mode every card supports, so it is the safe
+    // default — cards without a keyer (e.g. the SDI Micro) reject "external".
+    #[default]
     Default,
 }
 
