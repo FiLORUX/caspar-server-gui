@@ -9,6 +9,13 @@ import { useAppStore } from '../lib/store';
 import * as tauri from '../lib/tauri';
 import { validateConfig, errorsOnly } from '../lib/validation';
 
+// CasparCG logs "Failed to enable external/internal keyer" at error level on any
+// DeckLink card that has no keyer hardware (e.g. the SDI Micro). It is benign:
+// the consumer still initialises and outputs fill, and 2.5.0 offers no keyer
+// value that avoids it. Recognise it so the embedded log notes it rather than
+// raising a false alarm.
+const BENIGN_KEYER_LOG = /failed to enable (external|internal) keyer/i;
+
 export function ServerPanel() {
   const { currentConfig, connection, connect, deckLinkDevices } = useAppStore();
   const [running, setRunning] = useState(false);
@@ -206,14 +213,22 @@ export function ServerPanel() {
         ) : (
           log.map((line, i) => {
             const lower = line.toLowerCase();
-            const cls = lower.includes('error') || lower.includes('fatal')
-              ? 'text-red-400'
-              : lower.includes('warning')
-                ? 'text-amber-400'
-                : 'text-[var(--color-text-secondary)]';
+            const benignKeyer = BENIGN_KEYER_LOG.test(line);
+            const cls = benignKeyer
+              ? 'text-amber-400/80'
+              : lower.includes('error') || lower.includes('fatal')
+                ? 'text-red-400'
+                : lower.includes('warning')
+                  ? 'text-amber-400'
+                  : 'text-[var(--color-text-secondary)]';
             return (
               <div key={i} className={cls}>
                 {line}
+                {benignKeyer && (
+                  <span className="text-[var(--color-text-muted)]">
+                    {'  '}— expected on a card with no hardware keyer; fill output is unaffected
+                  </span>
+                )}
               </div>
             );
           })
