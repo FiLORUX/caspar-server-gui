@@ -202,25 +202,17 @@ pub fn generate_caspar_xml(config: &CasparConfig) -> Result<String, CasparXmlErr
     // Root element
     writer.write_event(Event::Start(BytesStart::new("configuration")))?;
 
-    // Paths section. Empty path elements are omitted: CasparCG throws
-    // "Failed to create directory" when it resolves an empty path, so an unset
-    // path must fall through to CasparCG's own built-in default rather than be
-    // written as an empty element.
+    // Paths section. CasparCG requires each of these nodes to exist (a missing
+    // one throws "No such node (log-path)") and to be non-empty (an empty one
+    // throws "Failed to create directory"). Always write them, substituting
+    // CasparCG's own conventional default when the value is unset.
     writer.write_event(Event::Start(BytesStart::new("paths")))?;
-    if !config.paths.media.is_empty() {
-        write_element(&mut writer, "media-path", &config.paths.media)?;
-    }
-    if !config.paths.template.is_empty() {
-        write_element(&mut writer, "template-path", &config.paths.template)?;
-    }
-    if !config.paths.log.is_empty() {
-        write_element(&mut writer, "log-path", &config.paths.log)?;
-    }
-    if !config.paths.data.is_empty() {
-        write_element(&mut writer, "data-path", &config.paths.data)?;
-    }
+    write_element(&mut writer, "media-path", non_empty_or(&config.paths.media, "media/"))?;
+    write_element(&mut writer, "template-path", non_empty_or(&config.paths.template, "template/"))?;
+    write_element(&mut writer, "log-path", non_empty_or(&config.paths.log, "log/"))?;
+    write_element(&mut writer, "data-path", non_empty_or(&config.paths.data, "data/"))?;
     if let Some(ref font) = config.paths.font {
-        if !font.is_empty() {
+        if !font.trim().is_empty() {
             write_element(&mut writer, "font-path", font)?;
         }
     }
@@ -282,6 +274,16 @@ pub fn generate_caspar_xml(config: &CasparConfig) -> Result<String, CasparXmlErr
 
     let result = writer.into_inner().into_inner();
     Ok(String::from_utf8(result)?)
+}
+
+/// Return the value if it has content, otherwise the CasparCG default. Path
+/// nodes must always be present and non-empty in casparcg.config.
+fn non_empty_or<'a>(value: &'a str, default: &'a str) -> &'a str {
+    if value.trim().is_empty() {
+        default
+    } else {
+        value
+    }
 }
 
 fn write_element<W: std::io::Write>(
