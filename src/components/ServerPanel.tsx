@@ -7,9 +7,10 @@ import { useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useAppStore } from '../lib/store';
 import * as tauri from '../lib/tauri';
+import { validateConfig, errorsOnly } from '../lib/validation';
 
 export function ServerPanel() {
-  const { currentConfig, connection, connect } = useAppStore();
+  const { currentConfig, connection, connect, deckLinkDevices } = useAppStore();
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
@@ -54,11 +55,14 @@ export function ServerPanel() {
     };
   }, []);
 
-  // Poll AMCP until the freshly launched server answers, then connect.
+  // Poll AMCP until the freshly launched server answers, then connect — on the
+  // port the active profile actually configures, not a hard-coded default.
   const autoConnect = async () => {
+    const port =
+      useAppStore.getState().currentConfig?.caspar.controllers.tcp.port ?? 5250;
     for (let i = 0; i < 20; i++) {
       try {
-        await connect('localhost', 5250);
+        await connect('localhost', port);
         return;
       } catch {
         await new Promise((r) => setTimeout(r, 750));
@@ -66,15 +70,28 @@ export function ServerPanel() {
     }
   };
 
+  // The whole profile is validated up front; launch is refused while any hard
+  // error remains, so CasparCG is never handed a config it would reject.
+  const configErrors = currentConfig ? errorsOnly(validateConfig(currentConfig, deckLinkDevices)) : [];
+  const canStart = !!currentConfig && configErrors.length === 0;
+
   const start = async () => {
     setError(null);
-    if (!currentConfig) {
+    // Re-derive from live store state rather than the render-time snapshot, so a
+    // launch (including via restart) can never use stale validation results.
+    const cfg = useAppStore.getState().currentConfig;
+    const devices = useAppStore.getState().deckLinkDevices;
+    if (!cfg) {
       setError('Select a profile first');
+      return;
+    }
+    if (errorsOnly(validateConfig(cfg, devices)).length > 0) {
+      setError('Resolve the configuration errors below before starting');
       return;
     }
     setLog([]);
     try {
-      await tauri.startCasparServer(currentConfig);
+      await tauri.startCasparServer(cfg);
       setRunning(true);
       autoConnect();
     } catch (e) {
@@ -125,9 +142,15 @@ export function ServerPanel() {
           ) : (
             <button
               onClick={start}
-              disabled={!currentConfig}
-              title={!currentConfig ? 'Select a profile first' : 'Write config and launch casparcg.exe'}
-              className="px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+              disabled={!canStart}
+              title={
+                !currentConfig
+                  ? 'Select a profile first'
+                  : configErrors.length > 0
+                    ? 'Resolve configuration errors before starting'
+                    : 'Write config and launch casparcg.exe'
+              }
+              className="px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
               ▶ Start Server
             </button>
@@ -150,6 +173,25 @@ export function ServerPanel() {
 
       {error && (
         <div className="mb-3 p-2 rounded bg-red-500/15 text-red-400 text-sm">{error}</div>
+      )}
+
+      {!running && configErrors.length > 0 && (
+        <div className="mb-3 p-3 rounded bg-red-500/10 border border-red-500/30 text-sm">
+          <div className="font-medium text-red-400 mb-1">
+            Configuration {configErrors.length === 1 ? 'error' : 'errors'} — fix in the Channels tab before starting:
+          </div>
+          <ul className="space-y-1">
+            {configErrors.map((issue) => (
+              <li key={issue.id} className="text-red-300 flex items-start gap-1.5">
+                <span aria-hidden>✕</span>
+                <span>
+                  {issue.channelIndex !== undefined ? `Channel ${issue.channelIndex + 1}: ` : ''}
+                  {issue.message}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {/* Embedded live server log */}

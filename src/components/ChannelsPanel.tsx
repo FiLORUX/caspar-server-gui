@@ -1,5 +1,7 @@
 // Channels configuration panel
-// Configure video channels and their consumers
+// Configure video channels and their consumers. Validation is driven entirely
+// by validateConfig(): impossible choices are greyed out, and anything that
+// would still be wrong is shown inline so the operator sees it before launch.
 
 import { useState } from 'react';
 import { useAppStore } from '../lib/store';
@@ -21,6 +23,33 @@ import {
   createDefaultScreenConsumer,
   createDefaultSystemAudioConsumer,
 } from '../lib/types';
+import {
+  validateConfig,
+  devicesClaimedElsewhere,
+  issuesForChannel,
+  issuesForConsumer,
+  type ValidationIssue,
+} from '../lib/validation';
+
+/** Inline list of validation issues, colour-coded by severity. */
+function IssueList({ issues }: { issues: ValidationIssue[] }) {
+  if (issues.length === 0) return null;
+  return (
+    <div className="mt-2 space-y-1">
+      {issues.map((issue) => (
+        <div
+          key={issue.id}
+          className={`text-xs flex items-start gap-1.5 ${
+            issue.severity === 'error' ? 'text-red-400' : 'text-amber-400'
+          }`}
+        >
+          <span aria-hidden>{issue.severity === 'error' ? '✕' : '⚠'}</span>
+          <span>{issue.message}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function ChannelsPanel() {
   const {
@@ -45,6 +74,7 @@ export function ChannelsPanel() {
 
   const channels = currentConfig.caspar.channels;
   const anyChannelTesting = channelsTesting.size > 0;
+  const issues = validateConfig(currentConfig, deckLinkDevices);
 
   const handleTestChannels = async () => {
     try {
@@ -70,7 +100,7 @@ export function ChannelsPanel() {
   };
 
   const addChannel = () => {
-    updateChannels([...channels, { ...DEFAULT_CHANNEL }]);
+    updateChannels([...channels, { ...DEFAULT_CHANNEL, id: crypto.randomUUID() }]);
   };
 
   const removeChannel = (index: number) => {
@@ -120,9 +150,11 @@ export function ChannelsPanel() {
       <div className="space-y-4">
         {channels.map((channel, index) => (
           <ChannelCard
-            key={index}
+            key={channel.id ?? index}
             channel={channel}
             index={index}
+            config={currentConfig}
+            issues={issues}
             onUpdate={(ch) => updateChannel(index, ch)}
             onRemove={() => removeChannel(index)}
             canRemove={channels.length > 1}
@@ -150,6 +182,8 @@ export function ChannelsPanel() {
 interface ChannelCardProps {
   channel: Channel;
   index: number;
+  config: GlobalConfig;
+  issues: ValidationIssue[];
   onUpdate: (channel: Channel) => void;
   onRemove: () => void;
   canRemove: boolean;
@@ -162,6 +196,8 @@ interface ChannelCardProps {
 function ChannelCard({
   channel,
   index,
+  config,
+  issues,
   onUpdate,
   onRemove,
   canRemove,
@@ -171,12 +207,20 @@ function ChannelCard({
   onToggleTest,
 }: ChannelCardProps) {
   const [isExpanded, setIsExpanded] = useState(true);
+  const channelIssues = issuesForChannel(issues, index);
 
   const addConsumer = (type: Consumer['type']) => {
     let newConsumer: Consumer;
     switch (type) {
       case 'decklink':
         newConsumer = createDefaultDeckLinkConsumer();
+        // Default to the first card not already claimed elsewhere, so a fresh
+        // consumer starts valid rather than clashing with an existing one.
+        {
+          const taken = devicesClaimedElsewhere(config, index, channel.consumers.length);
+          const free = deckLinkDevices.find((d) => !taken.has(d.index));
+          if (free) newConsumer.device = free.index;
+        }
         break;
       case 'ndi':
         newConsumer = createDefaultNdiConsumer();
@@ -305,16 +349,22 @@ function ChannelCard({
             </div>
           </div>
 
+          <IssueList issues={channelIssues} />
+
           {channel.consumers.length === 0 ? (
             <div className="text-sm text-[var(--color-text-muted)] text-center py-4">
               No consumers configured. Add a consumer to output video.
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3 mt-3">
               {channel.consumers.map((consumer, ci) => (
                 <ConsumerCard
                   key={ci}
                   consumer={consumer}
+                  channelIndex={index}
+                  consumerIndex={ci}
+                  config={config}
+                  issues={issues}
                   onUpdate={(c) => updateConsumer(ci, c)}
                   onRemove={() => removeConsumer(ci)}
                   deckLinkDevices={deckLinkDevices}
@@ -330,12 +380,25 @@ function ChannelCard({
 
 interface ConsumerCardProps {
   consumer: Consumer;
+  channelIndex: number;
+  consumerIndex: number;
+  config: GlobalConfig;
+  issues: ValidationIssue[];
   onUpdate: (consumer: Consumer) => void;
   onRemove: () => void;
   deckLinkDevices: DeckLinkDevice[];
 }
 
-function ConsumerCard({ consumer, onUpdate, onRemove, deckLinkDevices }: ConsumerCardProps) {
+function ConsumerCard({
+  consumer,
+  channelIndex,
+  consumerIndex,
+  config,
+  issues,
+  onUpdate,
+  onRemove,
+  deckLinkDevices,
+}: ConsumerCardProps) {
   const typeLabels: Record<Consumer['type'], string> = {
     decklink: 'DeckLink',
     ndi: 'NDI',
@@ -343,8 +406,11 @@ function ConsumerCard({ consumer, onUpdate, onRemove, deckLinkDevices }: Consume
     'system-audio': 'System Audio',
   };
 
+  const consumerIssues = issuesForConsumer(issues, channelIndex, consumerIndex);
+  const hasError = consumerIssues.some((i) => i.severity === 'error');
+
   return (
-    <div className="consumer-card">
+    <div className={`consumer-card ${hasError ? 'ring-1 ring-red-500/40' : ''}`}>
       <div className="consumer-card-header">
         <span className="consumer-type-badge">{typeLabels[consumer.type]}</span>
         <button
@@ -359,6 +425,9 @@ function ConsumerCard({ consumer, onUpdate, onRemove, deckLinkDevices }: Consume
       {consumer.type === 'decklink' && (
         <DeckLinkConsumerForm
           consumer={consumer}
+          channelIndex={channelIndex}
+          consumerIndex={consumerIndex}
+          config={config}
           onUpdate={(c) => onUpdate(c)}
           devices={deckLinkDevices}
         />
@@ -377,18 +446,33 @@ function ConsumerCard({ consumer, onUpdate, onRemove, deckLinkDevices }: Consume
           System audio output (uses default audio device)
         </div>
       )}
+
+      <IssueList issues={consumerIssues} />
     </div>
   );
 }
 
 interface DeckLinkConsumerFormProps {
   consumer: DeckLinkConsumer;
+  channelIndex: number;
+  consumerIndex: number;
+  config: GlobalConfig;
   onUpdate: (consumer: DeckLinkConsumer) => void;
   devices: DeckLinkDevice[];
 }
 
-function DeckLinkConsumerForm({ consumer, onUpdate, devices }: DeckLinkConsumerFormProps) {
+function DeckLinkConsumerForm({
+  consumer,
+  channelIndex,
+  consumerIndex,
+  config,
+  onUpdate,
+  devices,
+}: DeckLinkConsumerFormProps) {
   const selectedDevice = devices.find((d) => d.index === consumer.device);
+  const claimedElsewhere = devicesClaimedElsewhere(config, channelIndex, consumerIndex);
+  const deviceListed = devices.some((d) => d.index === consumer.device);
+  const usesKeyDevice = consumer.keyer === 'external_separate_device';
 
   return (
     <div className="grid grid-cols-2 gap-3 text-sm">
@@ -399,14 +483,23 @@ function DeckLinkConsumerForm({ consumer, onUpdate, devices }: DeckLinkConsumerF
           onChange={(e) => onUpdate({ ...consumer, device: parseInt(e.target.value, 10) })}
           className="w-full text-sm"
         >
-          {devices.length > 0 ? (
-            devices.map((d) => (
-              <option key={d.index} value={d.index}>
+          {devices.map((d) => {
+            const taken = claimedElsewhere.has(d.index);
+            return (
+              <option key={d.index} value={d.index} disabled={taken}>
                 {d.display_name}
+                {taken ? ' — in use' : ''}
               </option>
-            ))
-          ) : (
-            <option value={consumer.device}>Device {consumer.device}</option>
+            );
+          })}
+          {/* Keep the configured value visible and selectable even when the card
+              is absent (or nothing was enumerated), so the value never silently
+              snaps to another device. */}
+          {!deviceListed && (
+            <option value={consumer.device}>
+              Device {consumer.device}
+              {devices.length > 0 ? ' — not detected' : ''}
+            </option>
           )}
         </select>
       </div>
@@ -415,20 +508,27 @@ function DeckLinkConsumerForm({ consumer, onUpdate, devices }: DeckLinkConsumerF
         <label className="block text-[var(--color-text-muted)] mb-1">Key Device</label>
         <select
           value={consumer.key_device ?? ''}
+          disabled={!usesKeyDevice}
           onChange={(e) =>
             onUpdate({
               ...consumer,
               key_device: e.target.value ? parseInt(e.target.value, 10) : undefined,
             })
           }
-          className="w-full text-sm"
+          className="w-full text-sm disabled:opacity-50"
+          title={usesKeyDevice ? undefined : 'Only used with External (Separate Device) keying'}
         >
           <option value="">None</option>
-          {devices.map((d) => (
-            <option key={d.index} value={d.index}>
-              {d.display_name}
-            </option>
-          ))}
+          {devices.map((d) => {
+            const isFill = d.index === consumer.device;
+            const taken = claimedElsewhere.has(d.index);
+            return (
+              <option key={d.index} value={d.index} disabled={isFill || taken}>
+                {d.display_name}
+                {isFill ? ' — fill device' : taken ? ' — in use' : ''}
+              </option>
+            );
+          })}
         </select>
       </div>
 
@@ -449,7 +549,16 @@ function DeckLinkConsumerForm({ consumer, onUpdate, devices }: DeckLinkConsumerF
         <label className="block text-[var(--color-text-muted)] mb-1">Keyer</label>
         <select
           value={consumer.keyer}
-          onChange={(e) => onUpdate({ ...consumer, keyer: e.target.value as DeckLinkConsumer['keyer'] })}
+          onChange={(e) => {
+            const keyer = e.target.value as DeckLinkConsumer['keyer'];
+            // The key device is only meaningful for external_separate_device;
+            // drop it when switching away so the saved profile stays clean.
+            onUpdate({
+              ...consumer,
+              keyer,
+              key_device: keyer === 'external_separate_device' ? consumer.key_device : undefined,
+            });
+          }}
           className="w-full text-sm"
         >
           <option value="default">Default (plain fill, no keying)</option>
@@ -464,8 +573,12 @@ function DeckLinkConsumerForm({ consumer, onUpdate, devices }: DeckLinkConsumerF
           </option>
           {/* External (Separate Device) uses two independent fill outputs — fill
               on this device, key on the key-device — so it needs no hardware
-              keyer and is the fill+key route for cards without one. */}
-          <option value="external_separate_device">External (Separate Device)</option>
+              keyer and is the fill+key route for cards without one. It does,
+              however, need a second card; greyed out when only one is detected. */}
+          <option value="external_separate_device" disabled={devices.length === 1}>
+            External (Separate Device)
+            {devices.length === 1 ? ' — needs a second card' : ''}
+          </option>
           <option
             value="internal"
             disabled={selectedDevice ? !selectedDevice.supports_internal_keying : false}
@@ -489,19 +602,6 @@ function DeckLinkConsumerForm({ consumer, onUpdate, devices }: DeckLinkConsumerF
                 .filter(Boolean)
                 .join(', ')
             : 'none — single output, fill or key only (pair a separate key device for fill+key)'}
-          {consumer.keyer === 'internal' && !selectedDevice.supports_internal_keying && (
-            <span className="text-amber-400">
-              {' '}
-              · the selected Internal keyer is unavailable on this card
-            </span>
-          )}
-          {consumer.keyer === 'external' && !selectedDevice.supports_external_keying && (
-            <span className="text-amber-400">
-              {' '}
-              · the selected External keyer is unavailable on this card — use Default for plain fill,
-              or External (Separate Device) with a key device for fill+key
-            </span>
-          )}
         </div>
       )}
 
