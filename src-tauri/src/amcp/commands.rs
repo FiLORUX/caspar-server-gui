@@ -21,51 +21,28 @@ impl AmcpClient {
     // Load fill/key test patterns for visual verification
     // ═══════════════════════════════════════════════════════════════
 
-    /// Start a channel test by loading fill/key identifier patterns
+    /// Start a channel test by loading the composited identifier pattern.
     ///
-    /// Loads the test pattern on layers 19 (key) and 20 (fill), with keyer enabled.
-    /// The test URL should point to the HTTP server serving the test patterns.
+    /// Loads a single HTML producer in "preview" mode (fill composited over key)
+    /// on one layer. The earlier approach — two HTML producers (separate fill and
+    /// key layers) plus `MIXER KEYER 1` — crashed CasparCG 2.5.0 on a card with no
+    /// hardware keyer. A single SDI output shows the composited image anyway, so a
+    /// single producer is both safe and correct here. The test URL points at the
+    /// built-in HTTP server serving the pattern.
     pub async fn start_channel_test(
         &self,
         channel: u32,
         test_server_url: &str,
     ) -> Result<(), AmcpError> {
-        // Build URLs for fill and key modes
-        let fill_url = format!(
-            "[HTML] {}/index.html?mode=fill&id={}",
+        let url = format!(
+            "[HTML] {}/index.html?mode=preview&id={}",
             test_server_url, channel
         );
-        let key_url = format!(
-            "[HTML] {}/index.html?mode=key&id={}",
-            test_server_url, channel
-        );
-
-        // Load fill on layer 20
-        let fill_cmd = format!("PLAY {}-{} {}", channel, TEST_FILL_LAYER, fill_url);
-        let response = self.send_command(&fill_cmd).await?;
+        let cmd = format!("PLAY {}-{} {}", channel, TEST_FILL_LAYER, url);
+        let response = self.send_command(&cmd).await?;
         if !response.is_success() {
             return Err(AmcpError::Protocol(format!(
-                "Failed to load fill pattern: {} {}",
-                response.code, response.message
-            )));
-        }
-
-        // Load key on layer 19
-        let key_cmd = format!("PLAY {}-{} {}", channel, TEST_KEY_LAYER, key_url);
-        let response = self.send_command(&key_cmd).await?;
-        if !response.is_success() {
-            return Err(AmcpError::Protocol(format!(
-                "Failed to load key pattern: {} {}",
-                response.code, response.message
-            )));
-        }
-
-        // Enable keyer on layer 19 to use it as external key for layer 20
-        let keyer_cmd = format!("MIXER {}-{} KEYER 1", channel, TEST_KEY_LAYER);
-        let response = self.send_command(&keyer_cmd).await?;
-        if !response.is_success() {
-            return Err(AmcpError::Protocol(format!(
-                "Failed to enable keyer: {} {}",
+                "Failed to load test pattern: {} {}",
                 response.code, response.message
             )));
         }
