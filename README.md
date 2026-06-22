@@ -1,104 +1,104 @@
 # CasparCG Server GUI
 
-A modern, cross-platform desktop application for configuring CasparCG Server 2.5.0 with integrated DeckLink SDK support.
+A Windows desktop app for running and configuring CasparCG Server 2.5.0. It is a
+profile-based configuration editor and a launcher: it starts and supervises the
+server and its media scanner, streams the console log into the window, and speaks
+AMCP to the running instance. It also exposes the DeckLink SDK directly for device
+setup and an SDI output test that drives the card itself, bypassing the GPU mixer
+(useful when the mixer renders black, e.g. on GPUs CasparCG cannot drive).
 
-Built with **Tauri 2.0** (Rust backend) and **React + TypeScript + Tailwind CSS** (frontend).
+Built with **Tauri 2** (Rust) and **React + TypeScript + Tailwind CSS**.
+
+> **Platform:** Windows. The DeckLink integration and the process supervision use
+> Windows-only facilities, and the app is only built and tested on Windows. The
+> Tauri/React shell is portable in principle, but macOS/Linux are not supported.
 
 ## Features
 
-- **Visual Configuration Editor** — Edit CasparCG configuration with a modern UI
-- **Profile Management** — Save, load, and switch between multiple configuration profiles
-- **DeckLink Integration** — Enumerate devices, configure duplex modes, set labels
-- **AMCP Client** — Connect to running CasparCG server for live status
-- **System Information** — Display versions for CasparCG, DeckLink, NDI, Scanner
-- **Cross-Platform** — Windows (primary), macOS, Linux
+- **Profiles** — save, load and switch CasparCG configurations. Channel
+  validation is the single source of truth and blocks launching an invalid
+  config (impossible options are greyed out, Start is gated on errors).
+- **Launch & supervise** — Start/Stop/Restart `casparcg.exe`; the launcher also
+  runs the media scanner and keeps both alive: it restarts the scanner if it
+  dies and restarts the server on a crash, with a crash-loop guard so an
+  unrenderable config cannot thrash. The console log is embedded and
+  colour-coded by severity; AMCP reconnects automatically after a restart.
+- **DeckLink** — enumerate devices, set duplex mode and persistent labels, read
+  live signal status, and run a direct-SDK **SDI test** (Fill / Key / Stop) that
+  works even where CasparCG's GPU mixer outputs black.
+- **AMCP** — auto-connect to the running server for version and status, and send
+  ad-hoc commands.
+- **Media scanner** — launched alongside the server on a free loopback port
+  (never 8000), with the matching `<amcp><media-server>` written into the
+  config so CLS/TLS/THUMBNAIL listings work.
+- **TSL UMD** — tally monitor.
+- **System info** — versions for CasparCG, the DeckLink driver, NDI and the
+  scanner; the Server panel shows the host's primary IP and AMCP port for
+  connecting a remote client.
 
-## Screenshot
+Panels: Server, Paths, Channels, Preview, DeckLink, System, TSL.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│  CasparCG Server GUI                                    [_] [□] [X]   │
-├────────────────────────────────────────────────────────────────────────┤
-│ ┌──────────────┐ ┌────────────────────────────────────────────────────┐│
-│ │  PROFILES    │ │ [Paths] [Channels] [DeckLink] [System Info]       ││
-│ │              │ ├────────────────────────────────────────────────────┤│
-│ │ ▸ Studio A   │ │                                                    ││
-│ │   Studio B   │ │  Active panel content                              ││
-│ │   Backup     │ │                                                    ││
-│ │              │ │                                                    ││
-│ │ [+ New]      │ │                                                    ││
-│ │ [Import]     │ │                                                    ││
-│ └──────────────┘ └────────────────────────────────────────────────────┘│
-├────────────────────────────────────────────────────────────────────────┤
-│ Server: ● Connected (2.5.0) | DeckLink: Duo 2 | NDI: 6.0.1           │
-└────────────────────────────────────────────────────────────────────────┘
-```
+## Quick start
 
-## Quick Start
-
-### Prerequisites
+### Requirements
 
 - [Node.js](https://nodejs.org/) 18+ with pnpm
-- [Rust](https://rustup.rs/) 1.70+
-- [Tauri CLI](https://tauri.app/start/prerequisites/)
+- [Rust](https://rustup.rs/) (stable, MSVC toolchain)
+- [Tauri prerequisites](https://tauri.app/start/prerequisites/) for Windows
+  (WebView2, Visual Studio Build Tools)
+- The Blackmagic **DeckLink SDK** is required only for the `decklink` feature.
 
 ### Development
 
 ```bash
-# Install dependencies
 pnpm install
-
-# Run in development mode
 pnpm tauri dev
-
-# Build for production
-pnpm tauri build
 ```
 
-### Windows Build (with DeckLink SDK)
+### Build
 
 ```bash
-# Build with DeckLink support (requires SDK)
-cargo build --release --features decklink
+# Installer without DeckLink support
+pnpm tauri build --bundles nsis
+
+# With DeckLink support (requires the SDK and the MSVC toolchain)
+pnpm tauri build --features decklink --bundles nsis
 ```
 
-## Project Structure
+The DeckLink integration is gated behind the `decklink` Cargo feature and
+compiled in only when requested.
+
+## Project structure
 
 ```
 caspar-server-gui/
-├── src/                       # React frontend
-│   ├── App.tsx               # Main application component
-│   ├── components/           # UI components
-│   │   ├── SetupWizard.tsx   # First-run setup
-│   │   ├── ProfileSidebar.tsx
-│   │   ├── TabBar.tsx
-│   │   ├── StatusBar.tsx
-│   │   ├── PathsPanel.tsx
-│   │   ├── ChannelsPanel.tsx
-│   │   ├── DeckLinkPanel.tsx
-│   │   └── SystemInfoPanel.tsx
-│   ├── lib/
-│   │   ├── types.ts          # TypeScript type definitions
-│   │   ├── tauri.ts          # Tauri command wrappers
-│   │   └── store.ts          # Zustand state management
+├── src/                        # React + TypeScript front end
+│   ├── App.tsx                 # Shell: tabs, app-level log/event listeners
+│   ├── components/             # Server, Paths, Channels, Preview, DeckLink,
+│   │                           #   System, TSL panels + setup wizard, profile
+│   │                           #   sidebar, tab bar, status bar
+│   ├── lib/                    # types, Tauri wrappers, Zustand store, validation
 │   └── styles/
-│       └── main.css          # Tailwind + custom CSS
-├── src-tauri/                 # Rust backend
+├── src-tauri/                  # Rust back end
 │   ├── src/
-│   │   ├── lib.rs            # Tauri commands (29 commands)
-│   │   ├── main.rs           # Entry point
-│   │   ├── amcp/             # AMCP TCP client
-│   │   ├── config/           # Config parsing/generation
-│   │   ├── decklink/         # DeckLink SDK integration
-│   │   └── system/           # System version detection
+│   │   ├── lib.rs              # Tauri commands + server/scanner supervisor
+│   │   ├── main.rs             # Entry point
+│   │   ├── amcp/               # AMCP TCP client
+│   │   ├── config/             # Global Config <-> casparcg.config (XML)
+│   │   ├── decklink/           # DeckLink SDK: enumeration, status, SDI test
+│   │   ├── http_server/        # Local test server for the preview/colour test
+│   │   ├── system/             # version + primary-IP detection
+│   │   └── tsl/                # TSL UMD tally monitor
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 └── package.json
 ```
 
-## Configuration Format
+## Configuration format
 
-The GUI uses a **Global Config** JSON format that wraps CasparCG configuration with additional metadata:
+The GUI stores each profile as a **Global Config** JSON file that wraps the
+CasparCG configuration with metadata, and generates a standard `casparcg.config`
+(XML) from it at launch:
 
 ```json
 {
@@ -108,20 +108,16 @@ The GUI uses a **Global Config** JSON format that wraps CasparCG configuration w
   "modified": "2026-01-20T14:30:00Z",
   "caspar": {
     "paths": {
-      "media": "/data/media/",
-      "template": "/data/templates/",
-      "log": "/var/log/casparcg/",
-      "data": "/data/casparcg/"
+      "media": "C:\\Users\\Operator\\Videos",
+      "template": "template/",
+      "log": "log/",
+      "data": "data/"
     },
     "channels": [
       {
         "videoMode": "1080i5000",
         "consumers": [
-          {
-            "type": "decklink",
-            "device": 1,
-            "embeddedAudio": true
-          }
+          { "type": "decklink", "device": 1, "embeddedAudio": true }
         ]
       }
     ]
@@ -130,7 +126,7 @@ The GUI uses a **Global Config** JSON format that wraps CasparCG configuration w
     "devices": [
       {
         "persistentId": "0x12345678",
-        "modelName": "DeckLink Duo 2",
+        "modelName": "DeckLink SDI Micro",
         "label": "Graphics Fill",
         "duplexMode": "half"
       }
@@ -139,30 +135,25 @@ The GUI uses a **Global Config** JSON format that wraps CasparCG configuration w
 }
 ```
 
-## Tauri Commands
+## Tauri commands
 
-The Rust backend exposes 29 commands:
+The Rust backend exposes Tauri commands grouped by area: configuration and
+profiles, server/scanner process control, DeckLink (enumeration, labels, duplex,
+status, SDI test), AMCP, the preview test server, the TSL UMD monitor, system
+info and primary-IP, GUI settings, and file dialogs. The authoritative list is
+the `generate_handler!` block in `src-tauri/src/lib.rs`.
 
-| Category | Commands |
-|----------|----------|
-| **Config** | `load_caspar_config`, `save_caspar_config`, `load_global_config`, `save_global_config`, `export_to_caspar_xml`, `create_default_config`, `list_profiles` |
-| **DeckLink** | `list_decklink_devices`, `get_decklink_info`, `set_decklink_label`, `set_decklink_duplex_mode`, `get_decklink_driver_version` |
-| **AMCP** | `amcp_connect`, `amcp_disconnect`, `amcp_is_connected`, `amcp_connection_info`, `amcp_version`, `amcp_info_system`, `amcp_send_command` |
-| **System** | `get_ndi_version`, `get_scanner_version`, `get_system_versions` |
-| **Settings** | `get_gui_settings`, `save_gui_settings`, `set_caspar_path` |
-| **Dialogs** | `pick_folder`, `pick_config_file`, `pick_save_location` |
-
-## Technology Stack
+## Technology stack
 
 | Component | Technology |
 |-----------|------------|
-| Desktop Framework | Tauri 2.0 |
-| Frontend | React 19, TypeScript 5.7 |
+| Desktop framework | Tauri 2 |
+| Frontend | React 19, TypeScript 5.8 |
 | Styling | Tailwind CSS 4 |
-| State Management | Zustand 5 |
-| XML Parsing | quick-xml 0.37 |
-| Async Runtime | Tokio |
-| DeckLink | Conditional compilation with feature flag |
+| State management | Zustand 5 |
+| XML | quick-xml |
+| Async runtime | Tokio |
+| DeckLink | direct SDK access behind the `decklink` Cargo feature |
 
 ## Licence
 

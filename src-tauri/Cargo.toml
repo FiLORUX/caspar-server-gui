@@ -1,7 +1,7 @@
 [package]
 name = "caspar-server-gui"
 version = "0.1.0"
-description = "Cross-platform GUI for configuring CasparCG Server"
+description = "Windows GUI to configure, launch and supervise CasparCG Server"
 authors = ["THAST"]
 edition = "2021"
 
