@@ -42,6 +42,27 @@ export function DeckLinkPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The direct SDI test needs exclusive access to the card, so it cannot run
+  // while CasparCG does. Poll the server state to gate the test button.
+  const [serverRunning, setServerRunning] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await tauri.casparServerRunning();
+        if (!cancelled) setServerRunning(r);
+      } catch {
+        /* ignore */
+      }
+    };
+    poll();
+    const id = setInterval(poll, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
   // Poll live signal status (~2 s). IDeckLinkStatus is passive, so this does not
   // disturb capture/playback; it just reflects input/reference lock in the UI.
   useEffect(() => {
@@ -181,6 +202,7 @@ export function DeckLinkPanel() {
               onWriteLabel={() => handleWriteLabel(device, getDeviceLabel(device))}
               isTesting={testing.has(device.index)}
               onToggleTest={() => toggleOutputTest(device)}
+              serverRunning={serverRunning}
             />
           ))}
         </div>
@@ -204,6 +226,7 @@ interface DeckLinkDeviceCardProps {
   onWriteLabel: () => void;
   isTesting: boolean;
   onToggleTest: () => void;
+  serverRunning: boolean;
 }
 
 function DeckLinkDeviceCard({
@@ -215,7 +238,11 @@ function DeckLinkDeviceCard({
   onWriteLabel,
   isTesting,
   onToggleTest,
+  serverRunning,
 }: DeckLinkDeviceCardProps) {
+  // The card can only be driven by one owner. While CasparCG runs it holds the
+  // card, so the direct SDI test is unavailable until the server is stopped.
+  const testBlocked = serverRunning && !isTesting;
   return (
     <div className="decklink-card">
       <div className="flex items-start justify-between mb-4">
@@ -235,14 +262,21 @@ function DeckLinkDeviceCard({
         </div>
         <button
           onClick={onToggleTest}
-          title="Drive this card's SDI output directly (colour + device number), bypassing CasparCG's GPU mixer. Verifies the physical SDI output even when CasparCG renders black."
+          disabled={testBlocked}
+          title={
+            testBlocked
+              ? 'Stop the CasparCG server first — it holds the card, so the direct SDI test cannot open the output.'
+              : "Drive this card's SDI output directly (colour + device number), bypassing CasparCG's GPU mixer. Verifies the physical SDI output even when CasparCG renders black."
+          }
           className={`px-3 py-1.5 text-sm rounded transition-colors whitespace-nowrap ${
-            isTesting
-              ? 'bg-amber-600 hover:bg-amber-700 text-white'
-              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+            testBlocked
+              ? 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-not-allowed'
+              : isTesting
+                ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
           }`}
         >
-          {isTesting ? '■ Stop SDI test' : '▶ Test SDI out'}
+          {isTesting ? '■ Stop SDI test' : testBlocked ? 'Stop server to test SDI' : '▶ Test SDI out'}
         </button>
       </div>
 

@@ -572,6 +572,11 @@ pub fn output_test_start(index: u32) -> Result<(), DeckLinkError> {
         match ffi::decklink_output_test_start(zero_based) {
             ffi::DECKLINK_OK => Ok(()),
             ffi::DECKLINK_ERROR_NO_DRIVER => Err(DeckLinkError::NoDriver),
+            ffi::DECKLINK_ERROR_QUERY_FAILED => Err(DeckLinkError::ConfigError(
+                "Could not open the SDI output. If CasparCG is running it holds the card — \
+                 stop the server first, then try the SDI test."
+                    .to_string(),
+            )),
             r => Err(DeckLinkError::ConfigError(format!(
                 "Failed to start output test (error {})",
                 r

@@ -713,13 +713,37 @@ DeckLinkError decklink_output_test_start(int32_t index) {
     if (index < 0) {
         return DECKLINK_ERROR_INVALID_INDEX;
     }
-    std::lock_guard<std::mutex> lock(g_output_tests_mutex);
-    if (g_output_tests.count(index)) {
-        return DECKLINK_OK; // already running
+    OutputTest* st = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_output_tests_mutex);
+        if (g_output_tests.count(index)) {
+            return DECKLINK_OK; // already running
+        }
+        st = new OutputTest();
+        g_output_tests[index] = st;
+        st->worker = std::thread(output_test_worker, static_cast<int>(index), st);
     }
-    OutputTest* st = new OutputTest();
-    g_output_tests[index] = st;
-    st->worker = std::thread(output_test_worker, static_cast<int>(index), st);
+
+    // Wait for the worker to report whether it actually got the SDI output open
+    // (it fails if the card is busy — e.g. CasparCG is running and holds it).
+    for (int i = 0; i < 150 && st->state.load() == 0; ++i) {
+        Sleep(10);
+    }
+    if (st->state.load() == 2) {
+        {
+            std::lock_guard<std::mutex> lock(g_output_tests_mutex);
+            auto it = g_output_tests.find(index);
+            if (it != g_output_tests.end() && it->second == st) {
+                g_output_tests.erase(it);
+            }
+        }
+        st->stop = true;
+        if (st->worker.joinable()) {
+            st->worker.join();
+        }
+        delete st;
+        return DECKLINK_ERROR_QUERY_FAILED;
+    }
     return DECKLINK_OK;
 }
 
