@@ -21,24 +21,25 @@ impl AmcpClient {
     // Load fill/key test patterns for visual verification
     // ═══════════════════════════════════════════════════════════════
 
-    /// Start a channel test by loading the composited identifier pattern.
+    /// Start a channel test by putting a solid colour fill on the channel.
     ///
-    /// Loads a single HTML producer in "preview" mode (fill composited over key)
-    /// on one layer. The earlier approach — two HTML producers (separate fill and
-    /// key layers) plus `MIXER KEYER 1` — crashed CasparCG 2.5.0 on a card with no
-    /// hardware keyer. A single SDI output shows the composited image anyway, so a
-    /// single producer is both safe and correct here. The test URL points at the
-    /// built-in HTTP server serving the pattern.
+    /// This deliberately does NOT use the HTML identifier: CasparCG's CEF/HTML
+    /// producer crashes the server outright on some setups (the process vanishes
+    /// right after the PLAY is acknowledged), which made "Test" kill the server
+    /// and show nothing. The colour producer is a plain, CEF-free path that
+    /// reliably reaches the SDI output, so Test answers the only question it needs
+    /// to — "is this channel actually producing output?" — without risking the
+    /// server. The HTML identifier still renders in the in-app Preview tab, which
+    /// uses the system webview rather than CasparCG's CEF.
+    ///
+    /// `test_server_url` is unused now but kept in the signature for callers.
     pub async fn start_channel_test(
         &self,
         channel: u32,
-        test_server_url: &str,
+        _test_server_url: &str,
     ) -> Result<(), AmcpError> {
-        let url = format!(
-            "[HTML] {}/index.html?mode=preview&id={}",
-            test_server_url, channel
-        );
-        let cmd = format!("PLAY {}-{} {}", channel, TEST_FILL_LAYER, url);
+        // Magenta — unmistakably a test signal, and easy to spot on a scope.
+        let cmd = format!("PLAY {}-{} #FFFF00FF", channel, TEST_FILL_LAYER);
         let response = self.send_command(&cmd).await?;
         if !response.is_success() {
             return Err(AmcpError::Protocol(format!(

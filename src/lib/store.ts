@@ -151,7 +151,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     } catch (error) {
       console.error('Failed to connect:', error);
-      set({ connection: { connected: false } });
+      set({ connection: { connected: false }, channelsTesting: new Set() });
       throw error;
     }
   },
@@ -159,7 +159,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   disconnect: async () => {
     try {
       await tauri.amcpDisconnect();
-      set({ connection: { connected: false } });
+      set({ connection: { connected: false }, channelsTesting: new Set() });
     } catch (error) {
       console.error('Failed to disconnect:', error);
     }
@@ -177,9 +177,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           return;
         }
       }
-      set({ connection: { connected: false } });
+      set({ connection: { connected: false }, channelsTesting: new Set() });
     } catch {
-      set({ connection: { connected: false } });
+      set({ connection: { connected: false }, channelsTesting: new Set() });
     }
   },
 
@@ -319,16 +319,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   stopChannelTest: async (channel: number) => {
-    const { channelsTesting } = get();
-
+    // Always clear the local testing flag — even if the AMCP CLEAR fails or the
+    // server has gone away — so the toggle can never get stuck "on".
     try {
       await tauri.stopChannelTest(channel);
-      const newTesting = new Set(channelsTesting);
-      newTesting.delete(channel);
-      set({ channelsTesting: newTesting });
     } catch (error) {
       console.error(`Failed to stop channel ${channel} test:`, error);
-      throw error;
+    } finally {
+      const newTesting = new Set(get().channelsTesting);
+      newTesting.delete(channel);
+      set({ channelsTesting: newTesting });
     }
   },
 
