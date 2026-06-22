@@ -4,7 +4,6 @@
 // — the embedded-log model of the classic CasparCG launcher.
 
 import { useEffect, useRef, useState } from 'react';
-import { listen } from '@tauri-apps/api/event';
 import { useAppStore } from '../lib/store';
 import * as tauri from '../lib/tauri';
 import { validateConfig, errorsOnly } from '../lib/validation';
@@ -17,31 +16,19 @@ import { validateConfig, errorsOnly } from '../lib/validation';
 const BENIGN_KEYER_LOG = /failed to enable (external|internal) keyer/i;
 
 export function ServerPanel() {
-  const { currentConfig, connection, connect, deckLinkDevices } = useAppStore();
+  const { currentConfig, connection, connect, deckLinkDevices, serverLog, clearServerLog } =
+    useAppStore();
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [log, setLog] = useState<string[]>([]);
   const logRef = useRef<HTMLDivElement>(null);
 
-  // Subscribe to the live server log emitted by the backend.
-  useEffect(() => {
-    const unlisten = listen<string>('caspar-log', (event) => {
-      setLog((prev) => {
-        const next = [...prev, event.payload];
-        return next.length > 2000 ? next.slice(-2000) : next;
-      });
-    });
-    return () => {
-      unlisten.then((u) => u());
-    };
-  }, []);
-
-  // Keep the log scrolled to the bottom.
+  // The log is captured app-level into the store (so it survives tab switches and
+  // a crash); just keep it scrolled to the bottom here.
   useEffect(() => {
     if (logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
-  }, [log]);
+  }, [serverLog]);
 
   // Reflect the live process state.
   useEffect(() => {
@@ -104,7 +91,7 @@ export function ServerPanel() {
       setError('Resolve the configuration errors below before starting');
       return;
     }
-    setLog([]);
+    clearServerLog();
     try {
       await tauri.startCasparServer(cfg);
       setRunning(true);
@@ -214,14 +201,14 @@ export function ServerPanel() {
         ref={logRef}
         className="flex-1 min-h-0 overflow-auto rounded bg-black/60 border border-[var(--color-border)] p-3 font-mono text-xs leading-relaxed"
       >
-        {log.length === 0 ? (
+        {serverLog.length === 0 ? (
           <div className="text-[var(--color-text-muted)]">
             {running
               ? 'Server running — no new console output. (CasparCG logs at startup, then goes quiet when idle.)'
               : 'No output yet — press Start Server. The CasparCG console log appears here.'}
           </div>
         ) : (
-          log.map((line, i) => {
+          serverLog.map((line, i) => {
             const lower = line.toLowerCase();
             const benignKeyer = BENIGN_KEYER_LOG.test(line);
             const cls = benignKeyer

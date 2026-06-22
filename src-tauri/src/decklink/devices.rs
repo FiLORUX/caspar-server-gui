@@ -162,7 +162,7 @@ mod ffi {
         pub fn decklink_get_api_version(version: *mut c_char, max_length: i32) -> i32;
         pub fn decklink_get_device_status(index: i32, status: *mut DeckLinkStatusInfo) -> i32;
         pub fn decklink_set_device_label(index: i32, label: *const c_char) -> i32;
-        pub fn decklink_output_test_start(index: i32) -> i32;
+        pub fn decklink_output_test_start(index: i32, mode: i32) -> i32;
         pub fn decklink_output_test_stop(index: i32) -> i32;
         pub fn decklink_output_test_stop_all();
     }
@@ -565,11 +565,11 @@ pub fn set_device_label(_persistent_id: &str, _label: &str) -> Result<(), DeckLi
 /// Start a direct SDI output test on a device (1-based index, as enumerated).
 /// Drives the SDI output directly, bypassing CasparCG's GPU mixer.
 #[cfg(feature = "decklink")]
-pub fn output_test_start(index: u32) -> Result<(), DeckLinkError> {
+pub fn output_test_start(index: u32, mode: u32) -> Result<(), DeckLinkError> {
     init()?;
     let zero_based = index.saturating_sub(1) as i32;
     unsafe {
-        match ffi::decklink_output_test_start(zero_based) {
+        match ffi::decklink_output_test_start(zero_based, mode as i32) {
             ffi::DECKLINK_OK => Ok(()),
             ffi::DECKLINK_ERROR_NO_DRIVER => Err(DeckLinkError::NoDriver),
             ffi::DECKLINK_ERROR_QUERY_FAILED => Err(DeckLinkError::ConfigError(
@@ -586,7 +586,7 @@ pub fn output_test_start(index: u32) -> Result<(), DeckLinkError> {
 }
 
 #[cfg(not(feature = "decklink"))]
-pub fn output_test_start(_index: u32) -> Result<(), DeckLinkError> {
+pub fn output_test_start(_index: u32, _mode: u32) -> Result<(), DeckLinkError> {
     Ok(())
 }
 

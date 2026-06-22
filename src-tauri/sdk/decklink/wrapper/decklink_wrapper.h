@@ -172,9 +172,11 @@ DeckLinkError decklink_set_device_label(int32_t index, const char* label);
  * output even on machines where CasparCG renders black (e.g. some AMD GPUs).
  *
  * @param index Device index (0-based). The digit drawn is index+1.
+ * @param mode  0 = fill (per-device colour + white digit),
+ *              1 = key  (white field + black digit; the matching key signal).
  * @return DECKLINK_OK on success, error code otherwise
  */
-DeckLinkError decklink_output_test_start(int32_t index);
+DeckLinkError decklink_output_test_start(int32_t index, int32_t mode);
 
 /**
  * Stop the direct SDI output test on a device (stops the thread, disables output).

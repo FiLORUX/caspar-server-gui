@@ -89,8 +89,9 @@ export async function getDeckLinkStatus(index: number): Promise<DeckLinkStatus> 
 
 // Direct SDI output test — drives the card's SDI output via the DeckLink SDK,
 // bypassing CasparCG's GPU mixer (works even where CasparCG renders black).
-export async function startDeckLinkOutputTest(index: number): Promise<void> {
-  return invoke('start_decklink_output_test', { index });
+// mode: 0 = fill (colour + white digit), 1 = key (white + black digit).
+export async function startDeckLinkOutputTest(index: number, mode: number): Promise<void> {
+  return invoke('start_decklink_output_test', { index, mode });
 }
 
 export async function stopDeckLinkOutputTest(index: number): Promise<void> {

@@ -59,6 +59,12 @@ interface AppState {
   testChannel: (channel: number) => Promise<void>;
   stopChannelTest: (channel: number) => Promise<void>;
 
+  // Server log — kept in the store (not in ServerPanel) so it survives tab
+  // switches and a crash; an app-level listener appends to it.
+  serverLog: string[];
+  appendServerLog: (line: string) => void;
+  clearServerLog: () => void;
+
   // Initialisation
   initialise: () => Promise<void>;
 }
@@ -331,6 +337,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ channelsTesting: newTesting });
     }
   },
+
+  // Server log
+  serverLog: [],
+  appendServerLog: (line) =>
+    set((s) => {
+      const next = [...s.serverLog, line];
+      return { serverLog: next.length > 2000 ? next.slice(-2000) : next };
+    }),
+  clearServerLog: () => set({ serverLog: [] }),
 
   // Initialisation
   initialise: async () => {

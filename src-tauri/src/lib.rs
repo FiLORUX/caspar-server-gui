@@ -183,8 +183,8 @@ async fn get_decklink_status(index: u32) -> Result<DeckLinkStatus, String> {
 /// output directly via the DeckLink SDK, bypassing CasparCG's GPU mixer, so the
 /// physical output can be verified even where CasparCG renders black.
 #[tauri::command]
-async fn start_decklink_output_test(index: u32) -> Result<(), String> {
-    decklink::output_test_start(index).map_err(|e| e.to_string())
+async fn start_decklink_output_test(index: u32, mode: u32) -> Result<(), String> {
+    decklink::output_test_start(index, mode).map_err(|e| e.to_string())
 }
 
 /// Stop a direct SDI output test on a device (1-based index).

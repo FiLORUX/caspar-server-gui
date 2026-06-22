@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { useAppStore } from './lib/store';
 import { ProfileSidebar } from './components/ProfileSidebar';
 import { TabBar } from './components/TabBar';
@@ -18,6 +19,17 @@ function App() {
   useEffect(() => {
     initialise().finally(() => setIsLoading(false));
   }, [initialise]);
+
+  // Capture the server log at the app level so it persists across tab switches
+  // and survives a crash — ServerPanel only reads it.
+  useEffect(() => {
+    const unlisten = listen<string>('caspar-log', (event) => {
+      useAppStore.getState().appendServerLog(event.payload);
+    });
+    return () => {
+      unlisten.then((u) => u());
+    };
+  }, []);
 
   if (isLoading) {
     return (

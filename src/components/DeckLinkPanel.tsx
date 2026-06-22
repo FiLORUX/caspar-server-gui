@@ -12,13 +12,13 @@ export function DeckLinkPanel() {
   // Devices currently showing the direct SDI output test (keyed by 1-based index).
   const [testing, setTesting] = useState<Set<number>>(new Set());
 
-  const toggleOutputTest = async (device: DeckLinkDevice) => {
+  const toggleOutputTest = async (device: DeckLinkDevice, mode: number) => {
     const on = testing.has(device.index);
     try {
       if (on) {
         await tauri.stopDeckLinkOutputTest(device.index);
       } else {
-        await tauri.startDeckLinkOutputTest(device.index);
+        await tauri.startDeckLinkOutputTest(device.index, mode);
       }
       setTesting((prev) => {
         const next = new Set(prev);
@@ -201,7 +201,7 @@ export function DeckLinkPanel() {
               onDuplexModeChange={(mode) => handleSetDuplexMode(device, mode)}
               onWriteLabel={() => handleWriteLabel(device, getDeviceLabel(device))}
               isTesting={testing.has(device.index)}
-              onToggleTest={() => toggleOutputTest(device)}
+              onToggleTest={(mode) => toggleOutputTest(device, mode)}
               serverRunning={serverRunning}
             />
           ))}
@@ -225,7 +225,7 @@ interface DeckLinkDeviceCardProps {
   onDuplexModeChange: (mode: string) => void;
   onWriteLabel: () => void;
   isTesting: boolean;
-  onToggleTest: () => void;
+  onToggleTest: (mode: number) => void;
   serverRunning: boolean;
 }
 
@@ -243,6 +243,8 @@ function DeckLinkDeviceCard({
   // The card can only be driven by one owner. While CasparCG runs it holds the
   // card, so the direct SDI test is unavailable until the server is stopped.
   const testBlocked = serverRunning && !isTesting;
+  // 0 = fill (colour + white number), 1 = key (white + black number).
+  const [testMode, setTestMode] = useState<number>(0);
   return (
     <div className="decklink-card">
       <div className="flex items-start justify-between mb-4">
@@ -260,24 +262,51 @@ function DeckLinkDeviceCard({
           </div>
           <div className="decklink-id mt-1">{device.persistent_id}</div>
         </div>
-        <button
-          onClick={onToggleTest}
-          disabled={testBlocked}
-          title={
-            testBlocked
-              ? 'Stop the CasparCG server first — it holds the card, so the direct SDI test cannot open the output.'
-              : "Drive this card's SDI output directly (colour + device number), bypassing CasparCG's GPU mixer. Verifies the physical SDI output even when CasparCG renders black."
-          }
-          className={`px-3 py-1.5 text-sm rounded transition-colors whitespace-nowrap ${
-            testBlocked
-              ? 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-not-allowed'
-              : isTesting
-                ? 'bg-amber-600 hover:bg-amber-700 text-white'
-                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-          }`}
-        >
-          {isTesting ? '■ Stop SDI test' : testBlocked ? 'Stop server to test SDI' : '▶ Test SDI out'}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Fill/Key mode — lockable only when not already testing this card. */}
+          <div className="flex rounded overflow-hidden border border-[var(--color-border)] text-xs">
+            {([
+              [0, 'Fill'],
+              [1, 'Key'],
+            ] as const).map(([m, lbl]) => (
+              <button
+                key={m}
+                onClick={() => setTestMode(m)}
+                disabled={isTesting}
+                title={
+                  m === 0
+                    ? 'Fill: per-device colour with a white number'
+                    : 'Key: white field with a black number (the matching key for the same number)'
+                }
+                className={`px-2 py-1 ${
+                  testMode === m
+                    ? 'bg-[var(--color-accent)] text-white'
+                    : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)]'
+                } ${isTesting ? 'opacity-60 cursor-not-allowed' : ''}`}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => onToggleTest(testMode)}
+            disabled={testBlocked}
+            title={
+              testBlocked
+                ? 'Stop the CasparCG server first — it holds the card, so the direct SDI test cannot open the output.'
+                : "Drive this card's SDI output directly (colour/key + device number), bypassing CasparCG's GPU mixer. Verifies the physical SDI output even when CasparCG renders black."
+            }
+            className={`px-3 py-1.5 text-sm rounded transition-colors whitespace-nowrap ${
+              testBlocked
+                ? 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-not-allowed'
+                : isTesting
+                  ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+            }`}
+          >
+            {isTesting ? '■ Stop SDI test' : testBlocked ? 'Stop server to test SDI' : '▶ Test SDI out'}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">

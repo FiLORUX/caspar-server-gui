@@ -573,10 +573,15 @@ static const YuvColour DEVICE_COLOURS[8] = {
     {128, 128, 128}, // grey
 };
 
-// Render a per-device colour field with the 1-based device number as large white
-// digits into an 8-bit UYVY buffer (w*2 bytes per row).
-static void fill_test_frame(unsigned char* p, int w, int h, int index) {
-    const YuvColour bg = DEVICE_COLOURS[index % 8];
+// Render the device number as large digits into an 8-bit UYVY buffer
+// (w*2 bytes per row). mode 0 (fill) = per-device colour field with a white
+// digit; mode 1 (key) = white field with a black digit — the matching key for
+// the same identifier, so a multiview shows fill and key with the same number.
+static void fill_test_frame(unsigned char* p, int w, int h, int index, int mode) {
+    const YuvColour colour = DEVICE_COLOURS[index % 8];
+    const YuvColour white = {235, 128, 128};
+    const YuvColour bg = (mode == 1) ? white : colour;
+    const unsigned char inkY = (mode == 1) ? 16 : 235; // key: black digit; fill: white
     const int number = index + 1;
 
     char digits[4];
@@ -617,10 +622,10 @@ static void fill_test_frame(unsigned char* p, int w, int h, int index) {
             bool ink0 = isInk(x0, y);
             bool ink1 = isInk(x0 + 1, y);
             unsigned char* g = row + static_cast<size_t>(xpair) * 4;
-            g[0] = (ink0 || ink1) ? 128 : bg.u;        // U (shared)
-            g[1] = ink0 ? 235 : bg.y;                  // Y0
+            g[0] = (ink0 || ink1) ? 128 : bg.u;        // U (shared); digit is achromatic
+            g[1] = ink0 ? inkY : bg.y;                 // Y0
             g[2] = (ink0 || ink1) ? 128 : bg.v;        // V (shared)
-            g[3] = ink1 ? 235 : bg.y;                  // Y1
+            g[3] = ink1 ? inkY : bg.y;                 // Y1
         }
     }
 }
@@ -644,7 +649,7 @@ static IDeckLink* get_device_at(int index) {
 
 // Runs on its own thread: owns all COM objects for the lifetime of the test so
 // there is no cross-apartment sharing.
-static void output_test_worker(int index, OutputTest* st) {
+static void output_test_worker(int index, int mode, OutputTest* st) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 
     IDeckLink* dl = get_device_at(index);
@@ -679,7 +684,7 @@ static void output_test_worker(int index, OutputTest* st) {
             void* bytes = nullptr;
             buf->GetBytes(&bytes);
             if (bytes) {
-                fill_test_frame(static_cast<unsigned char*>(bytes), 1920, 1080, index);
+                fill_test_frame(static_cast<unsigned char*>(bytes), 1920, 1080, index, mode);
             }
             buf->EndAccess(bmdBufferAccessWrite);
             buf->Release();
@@ -709,7 +714,7 @@ static void output_test_worker(int index, OutputTest* st) {
     CoUninitialize();
 }
 
-DeckLinkError decklink_output_test_start(int32_t index) {
+DeckLinkError decklink_output_test_start(int32_t index, int32_t mode) {
     if (index < 0) {
         return DECKLINK_ERROR_INVALID_INDEX;
     }
@@ -717,11 +722,12 @@ DeckLinkError decklink_output_test_start(int32_t index) {
     {
         std::lock_guard<std::mutex> lock(g_output_tests_mutex);
         if (g_output_tests.count(index)) {
-            return DECKLINK_OK; // already running
+            return DECKLINK_OK; // already running (stop first to change mode)
         }
         st = new OutputTest();
         g_output_tests[index] = st;
-        st->worker = std::thread(output_test_worker, static_cast<int>(index), st);
+        st->worker = std::thread(output_test_worker, static_cast<int>(index),
+                                 static_cast<int>(mode), st);
     }
 
     // Wait for the worker to report whether it actually got the SDI output open
@@ -831,8 +837,9 @@ DeckLinkError decklink_set_device_label(int32_t index, const char* label) {
     return DECKLINK_ERROR_NO_DRIVER;
 }
 
-DeckLinkError decklink_output_test_start(int32_t index) {
+DeckLinkError decklink_output_test_start(int32_t index, int32_t mode) {
     (void)index;
+    (void)mode;
     return DECKLINK_ERROR_NO_DRIVER;
 }
 
