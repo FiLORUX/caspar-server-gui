@@ -4,8 +4,8 @@ A Windows desktop app for running and configuring CasparCG Server 2.5.0. It is a
 profile-based configuration editor and a launcher: it starts and supervises the
 server and its media scanner, streams the console log into the window, and speaks
 AMCP to the running instance. It also exposes the DeckLink SDK directly — device
-setup, live signal status, and a direct SDI key/fill test driven straight from the
-SDK.
+setup, live signal status, and a direct **SDI key/fill test** that drives the card
+itself, bypassing CasparCG's GPU mixer.
 
 Built with **Tauri 2** (Rust) and **React + TypeScript + Tailwind CSS**.
 
@@ -25,7 +25,7 @@ Built with **Tauri 2** (Rust) and **React + TypeScript + Tailwind CSS**.
   colour-coded by severity; AMCP reconnects automatically after a restart.
 - **DeckLink** — enumerate devices, set duplex mode and persistent labels, read
   live signal status, and run a direct-SDK **SDI test** (Fill / Key / Stop) that
-  drives the card's key/fill output straight from the SDK.
+  drives the card's output directly, bypassing CasparCG's GPU mixer.
 - **AMCP** — auto-connect to the running server for version and status, and send
   ad-hoc commands.
 - **Media scanner** — launched alongside the server on a free loopback port
