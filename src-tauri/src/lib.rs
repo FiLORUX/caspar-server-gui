@@ -34,6 +34,8 @@ pub struct AppState {
     pub tsl_monitor: tsl::TslState,
     /// The launched CasparCG server process, if running
     pub caspar_process: Arc<Mutex<Option<std::process::Child>>>,
+    /// The media scanner process launched alongside the server, if running
+    pub scanner_process: Arc<Mutex<Option<std::process::Child>>>,
 }
 
 impl Default for AppState {
@@ -44,6 +46,7 @@ impl Default for AppState {
             test_server: http_server::create_test_server_state(),
             tsl_monitor: tsl::create_tsl_state(),
             caspar_process: Arc::new(Mutex::new(None)),
+            scanner_process: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -474,7 +477,55 @@ fn kill_stale_casparcg() {
             .args(["/F", "/T", "/IM", "casparcg.exe"])
             .creation_flags(CREATE_NO_WINDOW)
             .output();
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/IM", "scanner.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
     }
+}
+
+/// Launch the CasparCG media scanner (scanner.exe) from the install directory,
+/// streaming its output into the GUI log prefixed with [scanner]. CasparCG 2.x
+/// queries the scanner over HTTP for CLS/TLS/THUMBNAIL listings and thumbnails,
+/// so a client cannot browse media without it. Returns the child if it launched.
+fn spawn_scanner(dir: &std::path::Path, app: &tauri::AppHandle) -> Option<std::process::Child> {
+    let exe = dir.join("scanner.exe");
+    if !exe.exists() {
+        return None;
+    }
+    let mut command = std::process::Command::new(&exe);
+    command
+        .current_dir(dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command.spawn().ok()?;
+    for stream in [
+        child.stdout.take().map(StdStream::Out),
+        child.stderr.take().map(StdStream::Err),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let lines = match stream {
+                StdStream::Out(out) => Box::new(std::io::BufReader::new(out).lines())
+                    as Box<dyn Iterator<Item = std::io::Result<String>>>,
+                StdStream::Err(err) => Box::new(std::io::BufReader::new(err).lines()),
+            };
+            for line in lines.map_while(Result::ok) {
+                let _ = app.emit("caspar-log", format!("[scanner] {}", line));
+            }
+        });
+    }
+    Some(child)
 }
 
 /// Write the active configuration to casparcg.config and launch casparcg.exe
@@ -568,6 +619,50 @@ async fn start_caspar_server(
 
     let _ = app.emit("caspar-log", format!("[launcher] started {}", exe.display()));
     *state.caspar_process.lock().await = Some(child);
+
+    // Launch the media scanner alongside the server so a connected client can
+    // list media/templates and fetch thumbnails (CLS/TLS/THUMBNAIL).
+    if let Some(scanner) = spawn_scanner(&dir, &app) {
+        let _ = app.emit("caspar-log", "[launcher] started media scanner".to_string());
+        *state.scanner_process.lock().await = Some(scanner);
+    } else {
+        let _ = app.emit(
+            "caspar-log",
+            "[launcher] scanner.exe not found — media listing will be unavailable".to_string(),
+        );
+    }
+
+    // Watchdog: while the server runs, relaunch the scanner if it dies (it is
+    // the more crash-prone of the two and safe to restart). The server itself is
+    // left to the user's Start/Stop — auto-restarting it would fight Stop and
+    // thrash on a config the GPU cannot render.
+    {
+        let scanner_arc = state.scanner_process.clone();
+        let caspar_arc = state.caspar_process.clone();
+        let app2 = app.clone();
+        let dir2 = dir.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                {
+                    let mut cp = caspar_arc.lock().await;
+                    let server_alive = matches!(cp.as_mut().map(|c| c.try_wait()), Some(Ok(None)));
+                    if !server_alive {
+                        break; // server gone — stop watching
+                    }
+                }
+                let mut sp = scanner_arc.lock().await;
+                let scanner_dead = !matches!(sp.as_mut().map(|c| c.try_wait()), Some(Ok(None)));
+                if scanner_dead {
+                    if let Some(child) = spawn_scanner(&dir2, &app2) {
+                        let _ = app2.emit("caspar-log", "[launcher] media scanner restarted".to_string());
+                        *sp = Some(child);
+                    }
+                }
+            }
+        });
+    }
+
     Ok(())
 }
 
@@ -580,8 +675,17 @@ enum StdStream {
 /// Stop the launched CasparCG server process.
 #[tauri::command]
 async fn stop_caspar_server(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let mut proc = state.caspar_process.lock().await;
-    if let Some(mut child) = proc.take() {
+    // Take the server handle first so the scanner watchdog sees the server gone
+    // and stops before we kill the scanner (otherwise it could relaunch it).
+    let server = state.caspar_process.lock().await.take();
+
+    // Stop the media scanner alongside the server.
+    if let Some(mut scanner) = state.scanner_process.lock().await.take() {
+        kill_process_tree(scanner.id());
+        let _ = scanner.wait();
+    }
+
+    if let Some(mut child) = server {
         // Kill the whole tree, not just the direct child — CasparCG spawns CEF
         // subprocesses that would otherwise survive and keep holding the card.
         kill_process_tree(child.id());
@@ -807,13 +911,24 @@ pub fn run() {
                 // Stop any direct SDI output tests (releases the cards' outputs).
                 decklink::output_test_stop_all();
 
-                let process = app_handle.state::<AppState>().caspar_process.clone();
-                let pid = process
+                let app_state = app_handle.state::<AppState>();
+                let pid = app_state
+                    .caspar_process
                     .try_lock()
                     .ok()
                     .and_then(|mut guard| guard.take())
                     .map(|child| child.id());
                 if let Some(pid) = pid {
+                    kill_process_tree(pid);
+                }
+                // Also stop the media scanner.
+                let scanner_pid = app_state
+                    .scanner_process
+                    .try_lock()
+                    .ok()
+                    .and_then(|mut guard| guard.take())
+                    .map(|child| child.id());
+                if let Some(pid) = scanner_pid {
                     kill_process_tree(pid);
                 }
             }
