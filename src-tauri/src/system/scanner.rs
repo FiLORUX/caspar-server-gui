@@ -9,39 +9,39 @@ use std::time::Duration;
 /// interfaces invites clashes with co-hosted services on a shared machine.
 pub const HOST: &str = "127.0.0.1";
 
-/// CasparCG's stock media-scanner port. Tried first so a box where it is free
-/// behaves exactly like a stock install and matches operator expectations.
-pub const DEFAULT_PORT: u16 = 8000;
+/// Preferred media-scanner port. Deliberately NOT 8000. That is CasparCG's stock
+/// port, but using it here is dangerous: on Windows a loopback bind to
+/// 127.0.0.1:8000 SUCCEEDS even while another process already holds 0.0.0.0:8000
+/// (a specific address wins over a wildcard without SO_EXCLUSIVEADDRUSE), so the
+/// scanner would silently hijack localhost:8000 — which on a shared box can be a
+/// live service behind a reverse proxy or tunnel. We never use 8000.
+pub const PREFERRED_PORT: u16 = 8010;
 
-/// First fallback when 8000 is taken — common on a shared box where another
-/// local web service already owns it. When the scanner cannot bind its port the
-/// server reaches the wrong app and every CLS/TLS/THUMBNAIL listing fails with
-/// "Invalid Response", so falling back to a free port is what keeps media
-/// browsing working.
-pub const FALLBACK_PORT: u16 = 8010;
-
-/// Choose a free loopback port for the media scanner. Tries the stock 8000
-/// first, then 8010, then lets the OS assign any free port. Binding the same
-/// loopback host the scanner is launched with means a successful probe here is a
-/// reliable indicator the scanner can bind it a moment later.
+/// Choose a free loopback port for the media scanner. A port counts as free only
+/// if a WILDCARD (0.0.0.0) bind succeeds. This is the crux: a specific-address
+/// bind (127.0.0.1) wrongly succeeds on Windows when another process already
+/// holds the same port on 0.0.0.0, so probing the wildcard is what actually
+/// detects an in-use port and stops the scanner stealing another service's
+/// traffic. The scanner itself still listens on loopback only (`HOST`); the
+/// wildcard is used purely to probe.
 pub fn pick_port() -> u16 {
-    for candidate in [DEFAULT_PORT, FALLBACK_PORT] {
-        if TcpListener::bind((HOST, candidate)).is_ok() {
-            return candidate;
-        }
+    const PROBE_ANY: &str = "0.0.0.0";
+    if TcpListener::bind((PROBE_ANY, PREFERRED_PORT)).is_ok() {
+        return PREFERRED_PORT;
     }
-    TcpListener::bind((HOST, 0))
+    // Let the OS hand out a port that is free on every interface.
+    TcpListener::bind((PROBE_ANY, 0))
         .ok()
         .and_then(|listener| listener.local_addr().ok())
         .map(|addr| addr.port())
-        .unwrap_or(FALLBACK_PORT)
+        .unwrap_or(PREFERRED_PORT)
 }
 
 /// Get Media Scanner version
 ///
 /// Tries to connect to the scanner's HTTP endpoint to get version info
 pub async fn get_scanner_version(scanner_url: Option<&str>) -> Option<String> {
-    let default_url = format!("http://{}:{}/version", HOST, DEFAULT_PORT);
+    let default_url = format!("http://{}:{}/version", HOST, PREFERRED_PORT);
     let url = scanner_url.unwrap_or(&default_url);
 
     // Try HTTP request with short timeout
@@ -83,7 +83,7 @@ impl Default for ScannerEndpoint {
     fn default() -> Self {
         Self {
             host: HOST.to_string(),
-            port: DEFAULT_PORT,
+            port: PREFERRED_PORT,
         }
     }
 }

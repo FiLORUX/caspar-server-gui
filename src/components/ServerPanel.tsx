@@ -281,7 +281,7 @@ export function ServerPanel() {
             <span className="font-mono">
               {scannerEndpoint.host}:{scannerEndpoint.port}
             </span>{' '}
-            {scannerEndpoint.isDefault ? '(internal)' : '(internal — stock 8000 was busy)'}
+            {scannerEndpoint.isDefault ? '(internal)' : '(internal — preferred port was busy)'}
           </span>
         )}
       </div>

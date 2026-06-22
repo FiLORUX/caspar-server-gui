@@ -725,13 +725,13 @@ async fn start_caspar_server(
     // event so the GUI can show which port it landed on — on a busy box this is
     // not the stock 8000, and that fact is needed to make sense of the listings.
     if let Some(scanner) = spawn_scanner(&dir, &app, &scanner_host, scanner_port) {
-        let on_default = scanner_port == system::scanner::DEFAULT_PORT;
-        let msg = if on_default {
+        let on_preferred = scanner_port == system::scanner::PREFERRED_PORT;
+        let msg = if on_preferred {
             format!("[launcher] media scanner on {scanner_host}:{scanner_port}")
         } else {
             format!(
-                "[launcher] port {} busy — media scanner on {scanner_host}:{scanner_port} instead",
-                system::scanner::DEFAULT_PORT
+                "[launcher] preferred port {} busy — media scanner on {scanner_host}:{scanner_port} instead",
+                system::scanner::PREFERRED_PORT
             )
         };
         let _ = app.emit("caspar-log", msg);
@@ -740,7 +740,7 @@ async fn start_caspar_server(
             serde_json::json!({
                 "host": scanner_host,
                 "port": scanner_port,
-                "isDefault": on_default,
+                "isDefault": on_preferred,
             }),
         );
         *state.scanner_process.lock().await = Some(scanner);
