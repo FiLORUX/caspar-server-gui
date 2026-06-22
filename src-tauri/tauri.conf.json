@@ -35,5 +35,10 @@
     ],
     "resources": {
       "../key-fill-identifier": "key-fill-identifier"
+    },
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico"
+      }
     }
   }}
