@@ -162,6 +162,9 @@ mod ffi {
         pub fn decklink_get_api_version(version: *mut c_char, max_length: i32) -> i32;
         pub fn decklink_get_device_status(index: i32, status: *mut DeckLinkStatusInfo) -> i32;
         pub fn decklink_set_device_label(index: i32, label: *const c_char) -> i32;
+        pub fn decklink_output_test_start(index: i32) -> i32;
+        pub fn decklink_output_test_stop(index: i32) -> i32;
+        pub fn decklink_output_test_stop_all();
     }
 
     /// Convert a C string buffer to a Rust String
@@ -558,3 +561,57 @@ pub fn set_device_label(_persistent_id: &str, _label: &str) -> Result<(), DeckLi
     // No-op for development without the SDK
     Ok(())
 }
+
+/// Start a direct SDI output test on a device (1-based index, as enumerated).
+/// Drives the SDI output directly, bypassing CasparCG's GPU mixer.
+#[cfg(feature = "decklink")]
+pub fn output_test_start(index: u32) -> Result<(), DeckLinkError> {
+    init()?;
+    let zero_based = index.saturating_sub(1) as i32;
+    unsafe {
+        match ffi::decklink_output_test_start(zero_based) {
+            ffi::DECKLINK_OK => Ok(()),
+            ffi::DECKLINK_ERROR_NO_DRIVER => Err(DeckLinkError::NoDriver),
+            r => Err(DeckLinkError::ConfigError(format!(
+                "Failed to start output test (error {})",
+                r
+            ))),
+        }
+    }
+}
+
+#[cfg(not(feature = "decklink"))]
+pub fn output_test_start(_index: u32) -> Result<(), DeckLinkError> {
+    Ok(())
+}
+
+/// Stop the direct SDI output test on a device (1-based index).
+#[cfg(feature = "decklink")]
+pub fn output_test_stop(index: u32) -> Result<(), DeckLinkError> {
+    let zero_based = index.saturating_sub(1) as i32;
+    unsafe {
+        match ffi::decklink_output_test_stop(zero_based) {
+            ffi::DECKLINK_OK => Ok(()),
+            r => Err(DeckLinkError::ConfigError(format!(
+                "Failed to stop output test (error {})",
+                r
+            ))),
+        }
+    }
+}
+
+#[cfg(not(feature = "decklink"))]
+pub fn output_test_stop(_index: u32) -> Result<(), DeckLinkError> {
+    Ok(())
+}
+
+/// Stop all running direct SDI output tests (e.g. on shutdown).
+#[cfg(feature = "decklink")]
+pub fn output_test_stop_all() {
+    unsafe {
+        ffi::decklink_output_test_stop_all();
+    }
+}
+
+#[cfg(not(feature = "decklink"))]
+pub fn output_test_stop_all() {}

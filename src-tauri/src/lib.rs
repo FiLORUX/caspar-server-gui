@@ -179,6 +179,20 @@ async fn get_decklink_status(index: u32) -> Result<DeckLinkStatus, String> {
     decklink::get_device_status(index).map_err(|e| e.to_string())
 }
 
+/// Start a direct SDI output test on a device (1-based index). Drives the SDI
+/// output directly via the DeckLink SDK, bypassing CasparCG's GPU mixer, so the
+/// physical output can be verified even where CasparCG renders black.
+#[tauri::command]
+async fn start_decklink_output_test(index: u32) -> Result<(), String> {
+    decklink::output_test_start(index).map_err(|e| e.to_string())
+}
+
+/// Stop a direct SDI output test on a device (1-based index).
+#[tauri::command]
+async fn stop_decklink_output_test(index: u32) -> Result<(), String> {
+    decklink::output_test_stop(index).map_err(|e| e.to_string())
+}
+
 // ============================================================================
 // AMCP Commands
 // ============================================================================
@@ -744,6 +758,8 @@ pub fn run() {
             set_decklink_duplex_mode,
             get_decklink_driver_version,
             get_decklink_status,
+            start_decklink_output_test,
+            stop_decklink_output_test,
             // AMCP commands
             amcp_connect,
             amcp_disconnect,
@@ -788,6 +804,9 @@ pub fn run() {
             // When the GUI exits, kill the launched server and its tree so no
             // casparcg.exe is left holding the DeckLink card.
             if let tauri::RunEvent::Exit = event {
+                // Stop any direct SDI output tests (releases the cards' outputs).
+                decklink::output_test_stop_all();
+
                 let process = app_handle.state::<AppState>().caspar_process.clone();
                 let pid = process
                     .try_lock()

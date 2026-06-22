@@ -9,6 +9,38 @@ import type { DeckLinkDevice, DeckLinkStatus } from '../lib/types';
 export function DeckLinkPanel() {
   const { deckLinkDevices, loadDeckLinkDevices, currentConfig, updateConfig } = useAppStore();
   const [statuses, setStatuses] = useState<Record<string, DeckLinkStatus>>({});
+  // Devices currently showing the direct SDI output test (keyed by 1-based index).
+  const [testing, setTesting] = useState<Set<number>>(new Set());
+
+  const toggleOutputTest = async (device: DeckLinkDevice) => {
+    const on = testing.has(device.index);
+    try {
+      if (on) {
+        await tauri.stopDeckLinkOutputTest(device.index);
+      } else {
+        await tauri.startDeckLinkOutputTest(device.index);
+      }
+      setTesting((prev) => {
+        const next = new Set(prev);
+        if (on) next.delete(device.index);
+        else next.add(device.index);
+        return next;
+      });
+    } catch (error) {
+      console.error('Direct SDI output test toggle failed:', error);
+      alert(`Direct SDI output test failed: ${error}`);
+    }
+  };
+
+  // Stop every running test when the panel unmounts, so cards are released.
+  useEffect(() => {
+    return () => {
+      for (const index of testing) {
+        tauri.stopDeckLinkOutputTest(index).catch(() => {});
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Poll live signal status (~2 s). IDeckLinkStatus is passive, so this does not
   // disturb capture/playback; it just reflects input/reference lock in the UI.
@@ -147,6 +179,8 @@ export function DeckLinkPanel() {
               onLabelChange={(label) => updateDeviceLabel(device.persistent_id, label)}
               onDuplexModeChange={(mode) => handleSetDuplexMode(device, mode)}
               onWriteLabel={() => handleWriteLabel(device, getDeviceLabel(device))}
+              isTesting={testing.has(device.index)}
+              onToggleTest={() => toggleOutputTest(device)}
             />
           ))}
         </div>
@@ -168,6 +202,8 @@ interface DeckLinkDeviceCardProps {
   onLabelChange: (label: string) => void;
   onDuplexModeChange: (mode: string) => void;
   onWriteLabel: () => void;
+  isTesting: boolean;
+  onToggleTest: () => void;
 }
 
 function DeckLinkDeviceCard({
@@ -177,6 +213,8 @@ function DeckLinkDeviceCard({
   onLabelChange,
   onDuplexModeChange,
   onWriteLabel,
+  isTesting,
+  onToggleTest,
 }: DeckLinkDeviceCardProps) {
   return (
     <div className="decklink-card">
@@ -187,9 +225,25 @@ function DeckLinkDeviceCard({
             <span className="px-2 py-0.5 text-xs bg-[var(--color-accent)] text-white rounded">
               Device {device.index}
             </span>
+            {isTesting && (
+              <span className="px-2 py-0.5 text-xs font-medium bg-emerald-600/20 text-emerald-400 rounded">
+                SDI TEST LIVE
+              </span>
+            )}
           </div>
           <div className="decklink-id mt-1">{device.persistent_id}</div>
         </div>
+        <button
+          onClick={onToggleTest}
+          title="Drive this card's SDI output directly (colour + device number), bypassing CasparCG's GPU mixer. Verifies the physical SDI output even when CasparCG renders black."
+          className={`px-3 py-1.5 text-sm rounded transition-colors whitespace-nowrap ${
+            isTesting
+              ? 'bg-amber-600 hover:bg-amber-700 text-white'
+              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+          }`}
+        >
+          {isTesting ? '■ Stop SDI test' : '▶ Test SDI out'}
+        </button>
       </div>
 
       <div className="grid grid-cols-2 gap-4">

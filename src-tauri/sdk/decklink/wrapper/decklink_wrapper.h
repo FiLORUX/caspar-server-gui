@@ -164,6 +164,31 @@ DeckLinkError decklink_get_device_status(int32_t index, DeckLinkStatusInfo* stat
  */
 DeckLinkError decklink_set_device_label(int32_t index, const char* label);
 
+/**
+ * Start a direct SDI output test on a device. Drives the card's SDI output
+ * directly via IDeckLinkOutput (a background thread looping DisplayVideoFrameSync)
+ * with a solid, per-device colour and the device number drawn as a large digit.
+ * This bypasses CasparCG's GPU mixer entirely, so it verifies the physical SDI
+ * output even on machines where CasparCG renders black (e.g. some AMD GPUs).
+ *
+ * @param index Device index (0-based). The digit drawn is index+1.
+ * @return DECKLINK_OK on success, error code otherwise
+ */
+DeckLinkError decklink_output_test_start(int32_t index);
+
+/**
+ * Stop the direct SDI output test on a device (stops the thread, disables output).
+ *
+ * @param index Device index (0-based)
+ * @return DECKLINK_OK on success, error code otherwise
+ */
+DeckLinkError decklink_output_test_stop(int32_t index);
+
+/**
+ * Stop all running direct SDI output tests (e.g. on shutdown).
+ */
+void decklink_output_test_stop_all(void);
+
 #ifdef __cplusplus
 }
 #endif
