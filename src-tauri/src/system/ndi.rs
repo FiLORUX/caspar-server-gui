@@ -28,14 +28,51 @@ pub fn get_ndi_version() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn get_ndi_version_windows() -> Option<String> {
-    // Try to read from registry
-    // HKEY_LOCAL_MACHINE\SOFTWARE\NDI\InstallDir
-    // Then check version from NDI SDK DLL
+    use std::path::Path;
 
-    // For now, check if NDI SDK environment variable exists
-    std::env::var("NDI_SDK_DIR")
-        .ok()
-        .map(|_| "Installed".to_string())
+    const DLL: &str = "Processing.NDI.Lib.x64.dll";
+
+    // NDI Tools/Runtime set a versioned env var pointing at the runtime directory
+    // that holds the loader DLL (this is exactly what CasparCG loads). Check the
+    // newest first, then the SDK variable.
+    for var in [
+        "NDI_RUNTIME_DIR_V6",
+        "NDI_RUNTIME_DIR_V5",
+        "NDI_RUNTIME_DIR_V4",
+        "NDI_SDK_DIR",
+    ] {
+        if let Ok(dir) = std::env::var(var) {
+            if Path::new(&dir).join(DLL).exists() || Path::new(&dir).exists() {
+                return Some(format!("Installed ({})", var.trim_start_matches("NDI_")));
+            }
+        }
+    }
+
+    // Fall back to scanning the standard install root. NDI Tools installs as e.g.
+    // "C:\Program Files\NDI\NDI 6 Tools\Runtime\Processing.NDI.Lib.x64.dll";
+    // runtimes as "...\NDI 6 Runtime\v6\...". Report the product folder name.
+    let root = Path::new(r"C:\Program Files\NDI");
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            for sub in ["", "Runtime", "v6", "v5", "v4", r"Bin\x64"] {
+                let dll = if sub.is_empty() {
+                    dir.join(DLL)
+                } else {
+                    dir.join(sub).join(DLL)
+                };
+                if dll.exists() {
+                    return dir
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(str::to_string)
+                        .or_else(|| Some("Installed".to_string()));
+                }
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(target_os = "macos")]
