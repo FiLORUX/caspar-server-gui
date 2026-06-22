@@ -31,12 +31,11 @@ Built with **Tauri 2** (Rust) and **React + TypeScript + Tailwind CSS**.
 - **Media scanner** — launched alongside the server on a free loopback port
   (never 8000), with the matching `<amcp><media-server>` written into the
   config so CLS/TLS/THUMBNAIL listings work.
-- **TSL UMD** — tally monitor.
 - **System info** — versions for CasparCG, the DeckLink driver, NDI and the
   scanner; the Server panel shows the host's primary IP and AMCP port for
   connecting a remote client.
 
-Panels: Server, Paths, Channels, Preview, DeckLink, System, TSL.
+Panels: Server, Paths, Channels, Preview, DeckLink, System.
 
 ## Quick start
 
@@ -75,7 +74,7 @@ caspar-server-gui/
 ├── src/                        # React + TypeScript front end
 │   ├── App.tsx                 # Shell: tabs, app-level log/event listeners
 │   ├── components/             # Server, Paths, Channels, Preview, DeckLink,
-│   │                           #   System, TSL panels + setup wizard, profile
+│   │                           #   System panels + setup wizard, profile
 │   │                           #   sidebar, tab bar, status bar
 │   ├── lib/                    # types, Tauri wrappers, Zustand store, validation
 │   └── styles/
@@ -87,8 +86,7 @@ caspar-server-gui/
 │   │   ├── config/             # Global Config <-> casparcg.config (XML)
 │   │   ├── decklink/           # DeckLink SDK: enumeration, status, SDI test
 │   │   ├── http_server/        # Local test server for the preview/colour test
-│   │   ├── system/             # version + primary-IP detection
-│   │   └── tsl/                # TSL UMD tally monitor
+│   │   └── system/             # version + primary-IP detection
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 └── package.json
@@ -139,8 +137,8 @@ CasparCG configuration with metadata, and generates a standard `casparcg.config`
 
 The Rust backend exposes Tauri commands grouped by area: configuration and
 profiles, server/scanner process control, DeckLink (enumeration, labels, duplex,
-status, SDI test), AMCP, the preview test server, the TSL UMD monitor, system
-info and primary-IP, GUI settings, and file dialogs. The authoritative list is
+status, SDI test), AMCP, the preview test server, system info and primary-IP,
+GUI settings, and file dialogs. The authoritative list is
 the `generate_handler!` block in `src-tauri/src/lib.rs`.
 
 ## Technology stack

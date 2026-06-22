@@ -11,7 +11,6 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'preview', label: 'Preview' },
   { id: 'decklink', label: 'DeckLink' },
   { id: 'system', label: 'System Info' },
-  { id: 'tsl', label: 'TSL Tally' },
 ];
 
 export function TabBar() {
@@ -27,7 +26,6 @@ export function TabBar() {
           disabled={
             !currentConfig &&
             tab.id !== 'system' &&
-            tab.id !== 'tsl' &&
             tab.id !== 'server' &&
             tab.id !== 'preview'
           }

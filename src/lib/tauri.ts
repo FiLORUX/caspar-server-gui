@@ -10,7 +10,6 @@ import type {
   GlobalConfig,
   GuiSettings,
   SystemVersions,
-  TslDisplay,
 } from './types';
 
 // ============================================================================
@@ -182,26 +181,6 @@ export async function getSystemVersions(): Promise<SystemVersions> {
 
 export async function getPrimaryIp(): Promise<string | null> {
   return invoke('get_primary_ip');
-}
-
-// ============================================================================
-// TSL UMD Tally Monitor Commands
-// ============================================================================
-
-export async function startTslMonitor(port?: number): Promise<number> {
-  return invoke('start_tsl_monitor', { port });
-}
-
-export async function stopTslMonitor(): Promise<void> {
-  return invoke('stop_tsl_monitor');
-}
-
-export async function getTslDisplays(): Promise<TslDisplay[]> {
-  return invoke('get_tsl_displays');
-}
-
-export async function tslMonitorPort(): Promise<number | null> {
-  return invoke('tsl_monitor_port');
 }
 
 // ============================================================================
