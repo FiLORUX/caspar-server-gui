@@ -9,33 +9,43 @@ import type { DeckLinkDevice, DeckLinkStatus } from '../lib/types';
 export function DeckLinkPanel() {
   const { deckLinkDevices, loadDeckLinkDevices, currentConfig, updateConfig } = useAppStore();
   const [statuses, setStatuses] = useState<Record<string, DeckLinkStatus>>({});
-  // Devices currently showing the direct SDI output test (keyed by 1-based index).
-  const [testing, setTesting] = useState<Set<number>>(new Set());
+  // Direct SDI test live per device: 1-based index -> mode (0 = fill, 1 = key).
+  const [testing, setTesting] = useState<Map<number, number>>(new Map());
 
-  const toggleOutputTest = async (device: DeckLinkDevice, mode: number) => {
-    const on = testing.has(device.index);
+  // Start (or switch) the test on a device in the given mode. Switching mode on a
+  // running test stops it first, since a card can only be opened once.
+  const startTest = async (device: DeckLinkDevice, mode: number) => {
+    if (testing.get(device.index) === mode) return;
     try {
-      if (on) {
+      if (testing.has(device.index)) {
         await tauri.stopDeckLinkOutputTest(device.index);
-      } else {
-        await tauri.startDeckLinkOutputTest(device.index, mode);
       }
+      await tauri.startDeckLinkOutputTest(device.index, mode);
+      setTesting((prev) => new Map(prev).set(device.index, mode));
+    } catch (error) {
+      console.error('Direct SDI output test failed:', error);
+      alert(`Direct SDI output test failed: ${error}`);
+    }
+  };
+
+  const stopTest = async (device: DeckLinkDevice) => {
+    try {
+      await tauri.stopDeckLinkOutputTest(device.index);
+    } catch (error) {
+      console.error('Stop SDI test failed:', error);
+    } finally {
       setTesting((prev) => {
-        const next = new Set(prev);
-        if (on) next.delete(device.index);
-        else next.add(device.index);
+        const next = new Map(prev);
+        next.delete(device.index);
         return next;
       });
-    } catch (error) {
-      console.error('Direct SDI output test toggle failed:', error);
-      alert(`Direct SDI output test failed: ${error}`);
     }
   };
 
   // Stop every running test when the panel unmounts, so cards are released.
   useEffect(() => {
     return () => {
-      for (const index of testing) {
+      for (const index of testing.keys()) {
         tauri.stopDeckLinkOutputTest(index).catch(() => {});
       }
     };
@@ -200,8 +210,9 @@ export function DeckLinkPanel() {
               onLabelChange={(label) => updateDeviceLabel(device.persistent_id, label)}
               onDuplexModeChange={(mode) => handleSetDuplexMode(device, mode)}
               onWriteLabel={() => handleWriteLabel(device, getDeviceLabel(device))}
-              isTesting={testing.has(device.index)}
-              onToggleTest={(mode) => toggleOutputTest(device, mode)}
+              liveMode={testing.has(device.index) ? (testing.get(device.index) as number) : -1}
+              onStart={(mode) => startTest(device, mode)}
+              onStop={() => stopTest(device)}
               serverRunning={serverRunning}
             />
           ))}
@@ -224,8 +235,9 @@ interface DeckLinkDeviceCardProps {
   onLabelChange: (label: string) => void;
   onDuplexModeChange: (mode: string) => void;
   onWriteLabel: () => void;
-  isTesting: boolean;
-  onToggleTest: (mode: number) => void;
+  liveMode: number; // -1 = not testing, 0 = fill live, 1 = key live
+  onStart: (mode: number) => void;
+  onStop: () => void;
   serverRunning: boolean;
 }
 
@@ -236,15 +248,15 @@ function DeckLinkDeviceCard({
   onLabelChange,
   onDuplexModeChange,
   onWriteLabel,
-  isTesting,
-  onToggleTest,
+  liveMode,
+  onStart,
+  onStop,
   serverRunning,
 }: DeckLinkDeviceCardProps) {
+  const isTesting = liveMode >= 0;
   // The card can only be driven by one owner. While CasparCG runs it holds the
-  // card, so the direct SDI test is unavailable until the server is stopped.
+  // card, so starting the direct SDI test is unavailable until the server stops.
   const testBlocked = serverRunning && !isTesting;
-  // 0 = fill (colour + white number), 1 = key (white + black number).
-  const [testMode, setTestMode] = useState<number>(0);
   return (
     <div className="decklink-card">
       <div className="flex items-start justify-between mb-4">
@@ -256,55 +268,62 @@ function DeckLinkDeviceCard({
             </span>
             {isTesting && (
               <span className="px-2 py-0.5 text-xs font-medium bg-emerald-600/20 text-emerald-400 rounded">
-                SDI TEST LIVE
+                {liveMode === 1 ? 'KEY' : 'FILL'} SDI TEST LIVE
               </span>
             )}
           </div>
           <div className="decklink-id mt-1">{device.persistent_id}</div>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Fill/Key mode — lockable only when not already testing this card. */}
-          <div className="flex rounded overflow-hidden border border-[var(--color-border)] text-xs">
-            {([
-              [0, 'Fill'],
-              [1, 'Key'],
-            ] as const).map(([m, lbl]) => (
-              <button
-                key={m}
-                onClick={() => setTestMode(m)}
-                disabled={isTesting}
-                title={
-                  m === 0
-                    ? 'Fill: per-device colour with a white number'
-                    : 'Key: white field with a black number (the matching key for the same number)'
-                }
-                className={`px-2 py-1 ${
-                  testMode === m
-                    ? 'bg-[var(--color-accent)] text-white'
-                    : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)]'
-                } ${isTesting ? 'opacity-60 cursor-not-allowed' : ''}`}
-              >
-                {lbl}
-              </button>
-            ))}
-          </div>
+        {/* Direct SDI test: Fill and Key each start that mode (switching is one
+            click); Stop releases the card. Fill/Key need the server stopped. */}
+        <div className="flex items-center gap-2 text-sm">
           <button
-            onClick={() => onToggleTest(testMode)}
+            onClick={() => onStart(0)}
             disabled={testBlocked}
             title={
               testBlocked
-                ? 'Stop the CasparCG server first — it holds the card, so the direct SDI test cannot open the output.'
-                : "Drive this card's SDI output directly (colour/key + device number), bypassing CasparCG's GPU mixer. Verifies the physical SDI output even when CasparCG renders black."
+                ? 'Stop the CasparCG server first — it holds the card.'
+                : "Output this card's colour field with its number (fill), straight to SDI."
             }
-            className={`px-3 py-1.5 text-sm rounded transition-colors whitespace-nowrap ${
+            className={`px-3 py-1.5 rounded transition-colors ${
               testBlocked
                 ? 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-not-allowed'
-                : isTesting
-                  ? 'bg-amber-600 hover:bg-amber-700 text-white'
-                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                : liveMode === 0
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-border)]'
             }`}
           >
-            {isTesting ? '■ Stop SDI test' : testBlocked ? 'Stop server to test SDI' : '▶ Test SDI out'}
+            ▶ Fill
+          </button>
+          <button
+            onClick={() => onStart(1)}
+            disabled={testBlocked}
+            title={
+              testBlocked
+                ? 'Stop the CasparCG server first — it holds the card.'
+                : 'Output the matching key (white field, black number) straight to SDI.'
+            }
+            className={`px-3 py-1.5 rounded transition-colors ${
+              testBlocked
+                ? 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-not-allowed'
+                : liveMode === 1
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-border)]'
+            }`}
+          >
+            ▶ Key
+          </button>
+          <button
+            onClick={onStop}
+            disabled={!isTesting}
+            title={isTesting ? 'Stop the SDI test and release the card.' : undefined}
+            className={`px-3 py-1.5 rounded transition-colors ${
+              isTesting
+                ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-not-allowed'
+            }`}
+          >
+            ■ Stop
           </button>
         </div>
       </div>

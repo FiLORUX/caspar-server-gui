@@ -561,15 +561,17 @@ static const unsigned char DIGIT_FONT[10][5] = {
 
 struct YuvColour { unsigned char y, u, v; };
 
-// Distinct, well-separated BT.601 colours, one per device index.
+// Distinct, well-separated colours, one per device index. BT.709 legal-range
+// 8-bit YCbCr (correct matrix for 1080 HD); the key (white/black) is achromatic
+// and so matrix-independent.
 static const YuvColour DEVICE_COLOURS[8] = {
-    { 81,  90, 240}, // red
-    {145,  54,  34}, // green
-    { 41, 240, 110}, // blue
-    {210,  16, 146}, // yellow
-    {106, 202, 222}, // magenta
-    {170, 166,  16}, // cyan
-    {148,  73, 197}, // orange-ish
+    { 63, 102, 240}, // red
+    {173,  42,  26}, // green
+    { 32, 240, 118}, // blue
+    {219,  16, 138}, // yellow
+    { 78, 214, 230}, // magenta
+    {188, 154,  16}, // cyan
+    {150,  84, 198}, // orange-ish
     {128, 128, 128}, // grey
 };
 
