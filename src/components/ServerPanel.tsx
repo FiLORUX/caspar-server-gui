@@ -50,6 +50,14 @@ export function ServerPanel() {
       try {
         const r = await tauri.casparServerRunning();
         if (!cancelled) setRunning(r);
+        // If the process is gone, the AMCP connection cannot be live — clear any
+        // stale "connected (VERSION OK)" so the indicator tells the truth.
+        if (!r) {
+          const st = useAppStore.getState();
+          if (st.connection.connected) {
+            st.disconnect();
+          }
+        }
       } catch {
         /* ignore */
       }
@@ -208,7 +216,9 @@ export function ServerPanel() {
       >
         {log.length === 0 ? (
           <div className="text-[var(--color-text-muted)]">
-            No output yet — press Start Server. The CasparCG console log appears here.
+            {running
+              ? 'Server running — no new console output. (CasparCG logs at startup, then goes quiet when idle.)'
+              : 'No output yet — press Start Server. The CasparCG console log appears here.'}
           </div>
         ) : (
           log.map((line, i) => {
