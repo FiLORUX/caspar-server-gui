@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useAppStore } from './lib/store';
+import type { ScannerEndpoint } from './lib/types';
 import { ProfileSidebar } from './components/ProfileSidebar';
 import { TabBar } from './components/TabBar';
 import { PathsPanel } from './components/PathsPanel';
@@ -25,6 +26,18 @@ function App() {
   useEffect(() => {
     const unlisten = listen<string>('caspar-log', (event) => {
       useAppStore.getState().appendServerLog(event.payload);
+    });
+    return () => {
+      unlisten.then((u) => u());
+    };
+  }, []);
+
+  // Record the media scanner endpoint the launcher resolved at start, so the
+  // Server panel can show which port it landed on (the stock 8000 is not always
+  // free). Captured app-level for the same reason as the log.
+  useEffect(() => {
+    const unlisten = listen<ScannerEndpoint | null>('scanner-endpoint', (event) => {
+      useAppStore.getState().setScannerEndpoint(event.payload);
     });
     return () => {
       unlisten.then((u) => u());

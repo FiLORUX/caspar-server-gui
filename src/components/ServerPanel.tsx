@@ -15,12 +15,69 @@ import { validateConfig, errorsOnly } from '../lib/validation';
 // raising a false alarm.
 const BENIGN_KEYER_LOG = /failed to enable (external|internal) keyer/i;
 
+// Deterministic log colouring. Rather than substring-matching "error" anywhere
+// in a line — which mis-colours an info line that merely mentions an error — we
+// key off the structured level token each source actually emits: CasparCG's
+// "[timestamp] [level] …", the scanner's pino "level": <number>, and our own
+// "[launcher]" prefix. Same line in, same colour out, every time.
+function classifyLogLine(line: string): { cls: string; keyerNote?: boolean } {
+  // The launcher's own orchestration lines — distinct from server output.
+  if (line.startsWith('[launcher]')) {
+    const lower = line.toLowerCase();
+    const bad =
+      lower.includes('giving up') || lower.includes('failed') || lower.includes('crashed');
+    return { cls: bad ? 'text-red-400' : 'text-cyan-400' };
+  }
+  // The no-keyer "error" CasparCG logs on cards without keyer hardware is benign.
+  if (BENIGN_KEYER_LOG.test(line)) {
+    return { cls: 'text-amber-400/80', keyerNote: true };
+  }
+  // Scanner lines are pino JSON: { "level": <number> }. 50+ = error/fatal,
+  // 40 = warning, below = info/debug.
+  if (line.startsWith('[scanner]')) {
+    const m = line.match(/"level":\s*(\d+)/);
+    if (m) {
+      const level = parseInt(m[1], 10);
+      if (level >= 50) return { cls: 'text-red-400' };
+      if (level >= 40) return { cls: 'text-amber-400' };
+    }
+    return { cls: 'text-[var(--color-text-muted)]' };
+  }
+  // CasparCG server lines — colour by the level token, not the message body.
+  const m = line.match(/\]\s*\[(trace|debug|info|warning|error|fatal)\]/i);
+  if (m) {
+    switch (m[1].toLowerCase()) {
+      case 'fatal':
+      case 'error':
+        return { cls: 'text-red-400' };
+      case 'warning':
+        return { cls: 'text-amber-400' };
+      case 'trace':
+      case 'debug':
+        return { cls: 'text-[var(--color-text-muted)]' };
+      default:
+        return { cls: 'text-[var(--color-text-secondary)]' };
+    }
+  }
+  return { cls: 'text-[var(--color-text-secondary)]' };
+}
+
 export function ServerPanel() {
-  const { currentConfig, connection, connect, deckLinkDevices, serverLog, clearServerLog } =
-    useAppStore();
+  const {
+    currentConfig,
+    connection,
+    connect,
+    deckLinkDevices,
+    serverLog,
+    clearServerLog,
+    scannerEndpoint,
+  } = useAppStore();
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  // Tracks the previous poll's running state so we can detect the moment the
+  // server comes up (first Start or a supervised restart) and reconnect AMCP.
+  const prevRunning = useRef(false);
 
   // The log is captured app-level into the store (so it survives tab switches and
   // a crash); just keep it scrolled to the bottom here.
@@ -30,21 +87,29 @@ export function ServerPanel() {
     }
   }, [serverLog]);
 
-  // Reflect the live process state.
+  // Reflect the live process state, and keep the AMCP link in step with it.
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
       try {
         const r = await tauri.casparServerRunning();
-        if (!cancelled) setRunning(r);
-        // If the process is gone, the AMCP connection cannot be live — clear any
-        // stale "connected (VERSION OK)" so the indicator tells the truth.
+        if (cancelled) return;
+        setRunning(r);
+        const st = useAppStore.getState();
         if (!r) {
-          const st = useAppStore.getState();
+          // Process gone (Stop, crash, or mid-restart) — a live AMCP link cannot
+          // exist, so clear any stale "connected (VERSION OK)". The scanner
+          // endpoint is event-driven (cleared by the launcher on stop), so it is
+          // deliberately left alone here to survive a server-only restart.
           if (st.connection.connected) {
             st.disconnect();
           }
+        } else if (!prevRunning.current && !st.connection.connected) {
+          // Server just came up — first Start or a supervised restart — so
+          // re-establish AMCP without the operator touching anything.
+          autoConnect();
         }
+        prevRunning.current = r;
       } catch {
         /* ignore */
       }
@@ -95,6 +160,10 @@ export function ServerPanel() {
     try {
       await tauri.startCasparServer(cfg);
       setRunning(true);
+      // We drive the connect here, so mark this rising edge as handled — the
+      // poll's reconnect detector should only fire for a supervised restart
+      // (where start() is not called), not for this manual Start/Restart.
+      prevRunning.current = true;
       autoConnect();
     } catch (e) {
       setError(String(e));
@@ -173,6 +242,30 @@ export function ServerPanel() {
         </span>
       </div>
 
+      {/* Connection endpoints. A remote operator's client connects over AMCP to
+          this server's address on the configured port — that is the figure to
+          relay. The media scanner is loopback-internal (the server proxies
+          CLS/TLS/THUMBNAIL to it); its port is shown only so a non-stock value
+          is visible when diagnosing media browsing. */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 mb-3 text-xs text-[var(--color-text-secondary)]">
+        <span>
+          Client → AMCP port{' '}
+          <span className="font-mono text-[var(--color-text-primary)]">
+            {currentConfig?.caspar.controllers.tcp.port ?? 5250}
+          </span>{' '}
+          on this server's address
+        </span>
+        {scannerEndpoint && (
+          <span className={scannerEndpoint.isDefault ? '' : 'text-amber-400'}>
+            Media scanner{' '}
+            <span className="font-mono">
+              {scannerEndpoint.host}:{scannerEndpoint.port}
+            </span>{' '}
+            {scannerEndpoint.isDefault ? '(internal)' : '(internal — stock 8000 was busy)'}
+          </span>
+        )}
+      </div>
+
       {error && (
         <div className="mb-3 p-2 rounded bg-red-500/15 text-red-400 text-sm">{error}</div>
       )}
@@ -209,19 +302,11 @@ export function ServerPanel() {
           </div>
         ) : (
           serverLog.map((line, i) => {
-            const lower = line.toLowerCase();
-            const benignKeyer = BENIGN_KEYER_LOG.test(line);
-            const cls = benignKeyer
-              ? 'text-amber-400/80'
-              : lower.includes('error') || lower.includes('fatal')
-                ? 'text-red-400'
-                : lower.includes('warning')
-                  ? 'text-amber-400'
-                  : 'text-[var(--color-text-secondary)]';
+            const { cls, keyerNote } = classifyLogLine(line);
             return (
               <div key={i} className={cls}>
                 {line}
-                {benignKeyer && (
+                {keyerNote && (
                   <span className="text-[var(--color-text-muted)]">
                     {'  '}— expected on a card with no hardware keyer; fill output is unaffected
                   </span>

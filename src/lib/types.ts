@@ -286,6 +286,16 @@ export interface ConnectionStatus {
   version?: string;
 }
 
+// Where the media scanner actually ended up listening. The launcher resolves a
+// free loopback port at start (8000 if free, else a fallback) and reports it via
+// the `scanner-endpoint` event, so the operator can see whether the stock port
+// was available without reading the log.
+export interface ScannerEndpoint {
+  host: string;
+  port: number;
+  isDefault: boolean;
+}
+
 // ============================================================================
 // Default Values
 // ============================================================================

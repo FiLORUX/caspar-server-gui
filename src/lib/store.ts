@@ -6,6 +6,7 @@ import type {
   DeckLinkDevice,
   GlobalConfig,
   GuiSettings,
+  ScannerEndpoint,
   SystemVersions,
   TabId,
 } from './types';
@@ -64,6 +65,12 @@ interface AppState {
   serverLog: string[];
   appendServerLog: (line: string) => void;
   clearServerLog: () => void;
+
+  // Where the media scanner ended up listening, reported by the launcher at
+  // start. Kept in the store so the Server panel can surface the resolved port
+  // (the stock 8000 is not always free on a shared box).
+  scannerEndpoint: ScannerEndpoint | null;
+  setScannerEndpoint: (endpoint: ScannerEndpoint | null) => void;
 
   // Initialisation
   initialise: () => Promise<void>;
@@ -346,6 +353,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { serverLog: next.length > 2000 ? next.slice(-2000) : next };
     }),
   clearServerLog: () => set({ serverLog: [] }),
+
+  // Scanner endpoint
+  scannerEndpoint: null,
+  setScannerEndpoint: (endpoint) => set({ scannerEndpoint: endpoint }),
 
   // Initialisation
   initialise: async () => {

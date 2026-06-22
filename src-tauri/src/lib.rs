@@ -9,12 +9,14 @@ mod system;
 mod tsl;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
 
 use config::{
-    generate_caspar_xml, parse_caspar_xml, CasparConfig, GlobalConfig, GuiSettings,
+    generate_caspar_xml, parse_caspar_xml, CasparConfig, GlobalConfig, GuiSettings, MediaServer,
 };
 use decklink::{DeckLinkDevice, DeckLinkStatus, DuplexMode};
 
@@ -36,6 +38,10 @@ pub struct AppState {
     pub caspar_process: Arc<Mutex<Option<std::process::Child>>>,
     /// The media scanner process launched alongside the server, if running
     pub scanner_process: Arc<Mutex<Option<std::process::Child>>>,
+    /// Desired state: true while the server should be supervised. Start sets it,
+    /// Stop/app-exit/give-up clear it. The supervisor consults it so a user Stop
+    /// is never mistaken for a crash and never triggers a restart.
+    pub server_should_run: Arc<AtomicBool>,
 }
 
 impl Default for AppState {
@@ -47,6 +53,7 @@ impl Default for AppState {
             tsl_monitor: tsl::create_tsl_state(),
             caspar_process: Arc::new(Mutex::new(None)),
             scanner_process: Arc::new(Mutex::new(None)),
+            server_should_run: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -484,11 +491,123 @@ fn kill_stale_casparcg() {
     }
 }
 
+/// Terminate only casparcg.exe (and its CEF children), leaving scanner.exe alone.
+/// Used before a supervised restart: the crashed server's orphaned CEF helpers
+/// can keep holding the DeckLink card, which would make the fresh instance fail
+/// "Could not enable primary video output" — but the media scanner is healthy
+/// and must survive the server bouncing under it.
+fn kill_casparcg_only() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/IM", "casparcg.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+}
+
+// --- Supervisor policy ---------------------------------------------------------
+// The launcher's second job (after config) is to keep the server and scanner
+// alive deterministically. These constants encode that policy in one place.
+
+/// How often the supervisor checks the server and scanner.
+const SUPERVISOR_TICK: Duration = Duration::from_secs(3);
+/// Pause before relaunching a crashed server, so a hard-failing config cannot
+/// spin the CPU between attempts.
+const SERVER_RESTART_BACKOFF: Duration = Duration::from_secs(2);
+/// CasparCG's documented "please restart me" exit code (see the stock
+/// casparcg_auto_restart.bat, which restarts on ERRORLEVEL >= 5). Codes below
+/// this are a clean or fatal shutdown we must not fight.
+const CASPAR_RESTART_EXIT_CODE: i32 = 5;
+/// Crash-loop guard: at most this many crash-restarts within `CRASH_WINDOW`
+/// before the supervisor gives up. Without it an unrenderable config (e.g. the
+/// AMD GPU mixer that black-screens and crashes) would thrash the machine.
+const MAX_SERVER_CRASHES: usize = 3;
+/// Rolling window over which `MAX_SERVER_CRASHES` is counted.
+const CRASH_WINDOW: Duration = Duration::from_secs(60);
+
+/// Spawn casparcg.exe from `dir`, streaming its console output into the GUI as
+/// `caspar-log` events (no separate console window) — the embedded live log the
+/// classic launcher is built around. The config file is expected to already be
+/// written. Returns the child so the caller can track and supervise it.
+fn spawn_caspar(dir: &std::path::Path, app: &tauri::AppHandle) -> Result<std::process::Child, String> {
+    let exe = dir.join("casparcg.exe");
+    let mut command = std::process::Command::new(&exe);
+    command
+        .current_dir(dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Failed to launch CasparCG: {}", e))?;
+
+    // Blocking reads run on their own threads so the async runtime is never
+    // stalled; they end at EOF when the process exits.
+    for stream in [
+        child.stdout.take().map(StdStream::Out),
+        child.stderr.take().map(StdStream::Err),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let lines = match stream {
+                StdStream::Out(out) => Box::new(std::io::BufReader::new(out).lines())
+                    as Box<dyn Iterator<Item = std::io::Result<String>>>,
+                StdStream::Err(err) => Box::new(std::io::BufReader::new(err).lines()),
+            };
+            for line in lines.map_while(Result::ok) {
+                let _ = app.emit("caspar-log", line);
+            }
+        });
+    }
+
+    let _ = app.emit("caspar-log", format!("[launcher] started {}", exe.display()));
+    Ok(child)
+}
+
+/// Return to a clean stopped state from inside the supervisor: stop wanting the
+/// server, kill the media scanner, and tell the GUI its endpoint is gone. Used
+/// when the server exits cleanly/fatally or the crash-loop guard trips, so the
+/// machine is not left with an orphaned scanner and a stale endpoint readout.
+async fn supervisor_stand_down(
+    should_run: &Arc<AtomicBool>,
+    scanner_arc: &Arc<Mutex<Option<std::process::Child>>>,
+    app: &tauri::AppHandle,
+) {
+    should_run.store(false, Ordering::Release);
+    if let Some(mut scanner) = scanner_arc.lock().await.take() {
+        kill_process_tree(scanner.id());
+        let _ = scanner.wait();
+    }
+    let _ = app.emit("scanner-endpoint", serde_json::Value::Null);
+}
+
 /// Launch the CasparCG media scanner (scanner.exe) from the install directory,
 /// streaming its output into the GUI log prefixed with [scanner]. CasparCG 2.x
 /// queries the scanner over HTTP for CLS/TLS/THUMBNAIL listings and thumbnails,
 /// so a client cannot browse media without it. Returns the child if it launched.
-fn spawn_scanner(dir: &std::path::Path, app: &tauri::AppHandle) -> Option<std::process::Child> {
+///
+/// `host`/`port` pin the scanner's HTTP listener. The media-scanner reads nconf
+/// keys with a "__" separator, so `http__host`/`http__port` populate its
+/// `{ http: { host, port } }` config. CasparCG must query this exact endpoint —
+/// `start_caspar_server` writes the matching `<amcp><media-server>` block.
+fn spawn_scanner(
+    dir: &std::path::Path,
+    app: &tauri::AppHandle,
+    host: &str,
+    port: u16,
+) -> Option<std::process::Child> {
     let exe = dir.join("scanner.exe");
     if !exe.exists() {
         return None;
@@ -496,6 +615,8 @@ fn spawn_scanner(dir: &std::path::Path, app: &tauri::AppHandle) -> Option<std::p
     let mut command = std::process::Command::new(&exe);
     command
         .current_dir(dir)
+        .env("http__host", host)
+        .env("http__port", port.to_string())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     #[cfg(windows)]
@@ -532,7 +653,7 @@ fn spawn_scanner(dir: &std::path::Path, app: &tauri::AppHandle) -> Option<std::p
 /// from the configured installation directory.
 #[tauri::command]
 async fn start_caspar_server(
-    config: GlobalConfig,
+    mut config: GlobalConfig,
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
@@ -565,65 +686,63 @@ async fn start_caspar_server(
         return Err(format!("casparcg.exe not found in {}", dir.display()));
     }
 
+    // Pin the media scanner to a free loopback port and point CasparCG at it.
+    // CasparCG proxies CLS/TLS/THUMBNAIL to the scanner over HTTP; the stock port
+    // 8000 routinely clashes with another local web service on a shared box, and
+    // then the scanner cannot bind it and every listing fails with "Invalid
+    // Response". Resolve the port now so the written config and the spawned
+    // scanner always agree on the same endpoint.
+    let scanner_host = system::scanner::HOST.to_string();
+    let scanner_port = system::scanner::pick_port();
+    config.caspar.amcp.media_server = Some(MediaServer {
+        host: scanner_host.clone(),
+        port: scanner_port,
+    });
+
     // Write the active configuration so the server starts with what is shown.
     let xml = generate_caspar_xml(&config.caspar)
         .map_err(|e| format!("Failed to generate config: {}", e))?;
     std::fs::write(dir.join("casparcg.config"), xml)
         .map_err(|e| format!("Failed to write casparcg.config: {}", e))?;
 
-    // Capture the server's console output and stream it into the GUI as
-    // `caspar-log` events instead of opening a separate console window — this is
-    // the embedded live log the classic launcher (CasparLauncher) is built around.
-    let mut command = std::process::Command::new(&exe);
-    command
-        .current_dir(&dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("Failed to launch CasparCG: {}", e))?;
+    // Mark the server as wanted before launching so the supervisor (below) keeps
+    // it alive; Stop clears this, so a deliberate stop is never read as a crash.
+    state.server_should_run.store(true, Ordering::Release);
 
-    // Forward each output line to the front end. Blocking reads run on their own
-    // threads so the async runtime is never stalled; they end at EOF when the
-    // process exits.
-    for stream in [
-        child.stdout.take().map(StdStream::Out),
-        child.stderr.take().map(StdStream::Err),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        let app = app.clone();
-        std::thread::spawn(move || {
-            use std::io::BufRead;
-            match stream {
-                StdStream::Out(out) => {
-                    for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
-                        let _ = app.emit("caspar-log", line);
-                    }
-                }
-                StdStream::Err(err) => {
-                    for line in std::io::BufReader::new(err).lines().map_while(Result::ok) {
-                        let _ = app.emit("caspar-log", line);
-                    }
-                }
-            }
-        });
-    }
-
-    let _ = app.emit("caspar-log", format!("[launcher] started {}", exe.display()));
+    // Launch casparcg.exe with its console streamed into the embedded GUI log.
+    let child = match spawn_caspar(&dir, &app) {
+        Ok(child) => child,
+        Err(e) => {
+            state.server_should_run.store(false, Ordering::Release);
+            return Err(e);
+        }
+    };
     *state.caspar_process.lock().await = Some(child);
 
     // Launch the media scanner alongside the server so a connected client can
-    // list media/templates and fetch thumbnails (CLS/TLS/THUMBNAIL).
-    if let Some(scanner) = spawn_scanner(&dir, &app) {
-        let _ = app.emit("caspar-log", "[launcher] started media scanner".to_string());
+    // list media/templates and fetch thumbnails (CLS/TLS/THUMBNAIL). Surface the
+    // resolved endpoint both as a log line and as a structured `scanner-endpoint`
+    // event so the GUI can show which port it landed on — on a busy box this is
+    // not the stock 8000, and that fact is needed to make sense of the listings.
+    if let Some(scanner) = spawn_scanner(&dir, &app, &scanner_host, scanner_port) {
+        let on_default = scanner_port == system::scanner::DEFAULT_PORT;
+        let msg = if on_default {
+            format!("[launcher] media scanner on {scanner_host}:{scanner_port}")
+        } else {
+            format!(
+                "[launcher] port {} busy — media scanner on {scanner_host}:{scanner_port} instead",
+                system::scanner::DEFAULT_PORT
+            )
+        };
+        let _ = app.emit("caspar-log", msg);
+        let _ = app.emit(
+            "scanner-endpoint",
+            serde_json::json!({
+                "host": scanner_host,
+                "port": scanner_port,
+                "isDefault": on_default,
+            }),
+        );
         *state.scanner_process.lock().await = Some(scanner);
     } else {
         let _ = app.emit(
@@ -632,30 +751,130 @@ async fn start_caspar_server(
         );
     }
 
-    // Watchdog: while the server runs, relaunch the scanner if it dies (it is
-    // the more crash-prone of the two and safe to restart). The server itself is
-    // left to the user's Start/Stop — auto-restarting it would fight Stop and
-    // thrash on a config the GPU cannot render.
+    // Supervisor: keep both the server and the scanner alive while the server is
+    // wanted. The scanner is safe to relaunch freely. The server is restarted on
+    // a crash or its restart-request exit code, but a crash-loop guard stops it
+    // thrashing on a config the machine cannot render, and a clean/fatal exit is
+    // left to stand. A user Stop clears `server_should_run`, so a deliberate stop
+    // is never mistaken for a crash.
     {
         let scanner_arc = state.scanner_process.clone();
         let caspar_arc = state.caspar_process.clone();
+        let should_run = state.server_should_run.clone();
         let app2 = app.clone();
         let dir2 = dir.clone();
+        let scanner_host2 = scanner_host.clone();
         tauri::async_runtime::spawn(async move {
+            let mut crashes: Vec<Instant> = Vec::new();
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                {
-                    let mut cp = caspar_arc.lock().await;
-                    let server_alive = matches!(cp.as_mut().map(|c| c.try_wait()), Some(Ok(None)));
-                    if !server_alive {
-                        break; // server gone — stop watching
-                    }
+                tokio::time::sleep(SUPERVISOR_TICK).await;
+                if !should_run.load(Ordering::Acquire) {
+                    break; // deliberate Stop / app exit — teardown is the caller's job
                 }
+
+                // --- Server: detect an exit and decide whether to restart. ---
+                let exit_code: Option<Option<i32>> = {
+                    let mut cp = caspar_arc.lock().await;
+                    match cp.as_mut().map(|c| c.try_wait()) {
+                        Some(Ok(Some(status))) => {
+                            *cp = None; // reaped — we own the restart from here
+                            Some(status.code())
+                        }
+                        Some(Ok(None)) => None, // still running
+                        Some(Err(_)) => {
+                            *cp = None;
+                            Some(None) // wait failed — treat as gone, code unknown
+                        }
+                        None => Some(None), // no handle — gone
+                    }
+                };
+
+                if let Some(code) = exit_code {
+                    // A Stop may have raced in while we looked — re-check intent.
+                    if !should_run.load(Ordering::Acquire) {
+                        break;
+                    }
+
+                    // Codes below 5 are a clean or fatal shutdown (e.g. a config
+                    // CasparCG refuses); restarting would only fail the same way.
+                    let restart = !matches!(code, Some(c) if c < CASPAR_RESTART_EXIT_CODE);
+                    if !restart {
+                        let shown = code.map(|c| c.to_string()).unwrap_or_else(|| "?".into());
+                        let _ = app2.emit(
+                            "caspar-log",
+                            format!("[launcher] CasparCG exited (code {shown}) — not restarting"),
+                        );
+                        supervisor_stand_down(&should_run, &scanner_arc, &app2).await;
+                        break;
+                    }
+
+                    // Code 5 is a deliberate restart request, not a crash; only
+                    // genuine crashes count against the loop guard.
+                    let is_crash = !matches!(code, Some(CASPAR_RESTART_EXIT_CODE));
+                    if is_crash {
+                        let now = Instant::now();
+                        crashes.retain(|t| now.duration_since(*t) < CRASH_WINDOW);
+                        crashes.push(now);
+                        if crashes.len() > MAX_SERVER_CRASHES {
+                            let _ = app2.emit(
+                                "caspar-log",
+                                format!(
+                                    "[launcher] CasparCG crashed {} times in {}s — giving up. Check the GPU/config, then press Start.",
+                                    crashes.len(),
+                                    CRASH_WINDOW.as_secs()
+                                ),
+                            );
+                            supervisor_stand_down(&should_run, &scanner_arc, &app2).await;
+                            break;
+                        }
+                    }
+
+                    let reason = match code {
+                        Some(CASPAR_RESTART_EXIT_CODE) => "requested a restart".to_string(),
+                        Some(c) => format!("crashed (code {c})"),
+                        None => "stopped unexpectedly".to_string(),
+                    };
+                    let _ = app2.emit("caspar-log", format!("[launcher] CasparCG {reason} — restarting…"));
+
+                    tokio::time::sleep(SERVER_RESTART_BACKOFF).await;
+                    if !should_run.load(Ordering::Acquire) {
+                        break;
+                    }
+                    // Clear orphaned CEF children that may still hold the card —
+                    // but not the healthy scanner running under it.
+                    kill_casparcg_only();
+                    match spawn_caspar(&dir2, &app2) {
+                        Ok(mut child) => {
+                            // A Stop may have raced in during launch — if the
+                            // server is no longer wanted, do not leave an orphan
+                            // casparcg.exe holding the card.
+                            if !should_run.load(Ordering::Acquire) {
+                                kill_process_tree(child.id());
+                                let _ = child.wait();
+                                break;
+                            }
+                            *caspar_arc.lock().await = Some(child);
+                        }
+                        Err(e) => {
+                            let _ = app2.emit("caspar-log", format!("[launcher] restart failed: {e}"));
+                            supervisor_stand_down(&should_run, &scanner_arc, &app2).await;
+                            break;
+                        }
+                    }
+                    continue; // the scanner is checked on the next tick
+                }
+
+                // --- Scanner: relaunch on the same port if it has died. ---
                 let mut sp = scanner_arc.lock().await;
                 let scanner_dead = !matches!(sp.as_mut().map(|c| c.try_wait()), Some(Ok(None)));
                 if scanner_dead {
-                    if let Some(child) = spawn_scanner(&dir2, &app2) {
-                        let _ = app2.emit("caspar-log", "[launcher] media scanner restarted".to_string());
+                    if let Some(child) = spawn_scanner(&dir2, &app2, &scanner_host2, scanner_port) {
+                        let _ = app2.emit(
+                            "caspar-log",
+                            format!(
+                                "[launcher] media scanner restarted on {scanner_host2}:{scanner_port}"
+                            ),
+                        );
                         *sp = Some(child);
                     }
                 }
@@ -674,16 +893,24 @@ enum StdStream {
 
 /// Stop the launched CasparCG server process.
 #[tauri::command]
-async fn stop_caspar_server(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    // Take the server handle first so the scanner watchdog sees the server gone
-    // and stops before we kill the scanner (otherwise it could relaunch it).
+async fn stop_caspar_server(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    // Clear the desired-state flag first so the supervisor sees a deliberate stop
+    // and never restarts the server we are about to kill.
+    state.server_should_run.store(false, Ordering::Release);
+
+    // Take the server handle so the supervisor sees it gone too.
     let server = state.caspar_process.lock().await.take();
 
-    // Stop the media scanner alongside the server.
+    // Stop the media scanner alongside the server, and tell the GUI its endpoint
+    // is gone so the panel does not imply a live scanner.
     if let Some(mut scanner) = state.scanner_process.lock().await.take() {
         kill_process_tree(scanner.id());
         let _ = scanner.wait();
     }
+    let _ = app.emit("scanner-endpoint", serde_json::Value::Null);
 
     if let Some(mut child) = server {
         // Kill the whole tree, not just the direct child — CasparCG spawns CEF
@@ -912,6 +1139,9 @@ pub fn run() {
                 decklink::output_test_stop_all();
 
                 let app_state = app_handle.state::<AppState>();
+                // Stop wanting the server so the supervisor cannot race a restart
+                // against shutdown.
+                app_state.server_should_run.store(false, Ordering::Release);
                 let pid = app_state
                     .caspar_process
                     .try_lock()
