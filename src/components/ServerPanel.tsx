@@ -74,6 +74,8 @@ export function ServerPanel() {
   } = useAppStore();
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // This host's primary IPv4 — what the operator points a remote client at.
+  const [primaryIp, setPrimaryIp] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   // Tracks the previous poll's running state so we can detect the moment the
   // server comes up (first Start or a supervised restart) and reconnect AMCP.
@@ -86,6 +88,12 @@ export function ServerPanel() {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [serverLog]);
+
+  // Resolve the host's primary IP once, so the panel can show the operator the
+  // exact endpoint to connect a remote client to.
+  useEffect(() => {
+    tauri.getPrimaryIp().then(setPrimaryIp).catch(() => setPrimaryIp(null));
+  }, []);
 
   // Reflect the live process state, and keep the AMCP link in step with it.
   useEffect(() => {
@@ -249,11 +257,23 @@ export function ServerPanel() {
           is visible when diagnosing media browsing. */}
       <div className="flex flex-wrap items-center gap-x-6 gap-y-1 mb-3 text-xs text-[var(--color-text-secondary)]">
         <span>
-          Client → AMCP port{' '}
-          <span className="font-mono text-[var(--color-text-primary)]">
-            {currentConfig?.caspar.controllers.tcp.port ?? 5250}
-          </span>{' '}
-          on this server's address
+          {primaryIp ? (
+            <>
+              Client →{' '}
+              <span className="font-mono text-[var(--color-text-primary)]">
+                {primaryIp}:{currentConfig?.caspar.controllers.tcp.port ?? 5250}
+              </span>{' '}
+              (AMCP)
+            </>
+          ) : (
+            <>
+              Client → AMCP port{' '}
+              <span className="font-mono text-[var(--color-text-primary)]">
+                {currentConfig?.caspar.controllers.tcp.port ?? 5250}
+              </span>{' '}
+              on this server's address
+            </>
+          )}
         </span>
         {scannerEndpoint && (
           <span className={scannerEndpoint.isDefault ? '' : 'text-amber-400'}>

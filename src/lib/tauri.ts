@@ -180,6 +180,10 @@ export async function getSystemVersions(): Promise<SystemVersions> {
   return invoke('get_system_versions');
 }
 
+export async function getPrimaryIp(): Promise<string | null> {
+  return invoke('get_primary_ip');
+}
+
 // ============================================================================
 // TSL UMD Tally Monitor Commands
 // ============================================================================

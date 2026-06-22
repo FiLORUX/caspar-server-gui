@@ -953,6 +953,13 @@ async fn get_scanner_version(url: Option<String>) -> Result<Option<String>, Stri
     Ok(system::scanner::get_scanner_version(url.as_deref()).await)
 }
 
+/// Get this host's primary IPv4 — the address a remote operator's client connects
+/// to. Returns None when only loopback/overlay addresses are available.
+#[tauri::command]
+async fn get_primary_ip() -> Result<Option<String>, String> {
+    Ok(system::network::primary_ip())
+}
+
 /// Get all system version information
 #[tauri::command]
 async fn get_system_versions(state: tauri::State<'_, AppState>) -> Result<system::SystemVersions, String> {
@@ -1119,6 +1126,7 @@ pub fn run() {
             // System info commands
             get_ndi_version,
             get_scanner_version,
+            get_primary_ip,
             get_system_versions,
             // GUI settings commands
             get_gui_settings,

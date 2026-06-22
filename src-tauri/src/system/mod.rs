@@ -2,6 +2,7 @@
 // Detects installed software versions and hardware
 
 pub mod ndi;
+pub mod network;
 pub mod scanner;
 
 pub use ndi::get_ndi_version;
