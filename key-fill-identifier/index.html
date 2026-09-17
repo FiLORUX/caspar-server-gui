@@ -1147,11 +1147,18 @@
           mode: params.get('mode'),
           id: params.get('id'),
           audio: params.get('audio'),
+          ident: params.get('ident'),
           auto: params.has('auto')
         };
       }
 
       const params = parseParams();
+
+      // Optional wording override for the meta line. Fill and key render this
+      // element with identical geometry and differ only in colour, so a studio
+      // can put its own ident on the pattern and still judge alignment from it.
+      // Capped so a long string cannot reflow the panel and invalidate the test.
+      const identOverride = (params.ident || '').trim().slice(0, 48);
 
       function numberToWord(num) {
         const words = [
@@ -1159,6 +1166,10 @@
           'NINE', 'TEN', 'ELEVEN', 'TWELVE', 'THIRTEEN', 'FOURTEEN', 'FIFTEEN', 'SIXTEEN'
         ];
         return words[num - 1] || 'ONE';
+      }
+
+      function metaText(num) {
+        return identOverride || `FEED IDENT ${numberToWord(num)}`;
       }
 
       // Check if ID was explicitly provided in URL (not 'auto' and no &auto flag)
@@ -1211,8 +1222,9 @@
       function updateUrl() {
         const effectiveAudio = getEffectiveAudio();
         const autoFlag = isAutoMode ? '&auto' : '';
-        const canonicalUrl = `${window.location.pathname}?mode=${mode}&id=${channelId}&audio=${effectiveAudio}${autoFlag}`;
-        const expectedSearch = `?mode=${mode}&id=${channelId}&audio=${effectiveAudio}${autoFlag}`;
+        const identFlag = identOverride ? `&ident=${encodeURIComponent(identOverride)}` : '';
+        const canonicalUrl = `${window.location.pathname}?mode=${mode}&id=${channelId}&audio=${effectiveAudio}${autoFlag}${identFlag}`;
+        const expectedSearch = `?mode=${mode}&id=${channelId}&audio=${effectiveAudio}${autoFlag}${identFlag}`;
         if (window.location.search !== expectedSearch) {
           window.history.replaceState(null, '', canonicalUrl);
         }
@@ -1237,7 +1249,7 @@
         document.getElementById('channelId').textContent = channelId;
         document.getElementById('fillLabel').textContent = `ID ${channelId} › FILL`;
         document.getElementById('keyLabel').textContent = `ID ${channelId} › KEY`;
-        document.getElementById('channelMeta').textContent = `FEED IDENT ${numberToWord(channelNum)}`;
+        document.getElementById('channelMeta').textContent = metaText(channelNum);
 
         // Update fingerprint
         const newSegmentIndex = ((channelNum - 1) % 8) + 1;
@@ -1322,7 +1334,7 @@
       if (modeBadge) modeBadge.textContent = `MODE: ${mode.toUpperCase()}`;
       updateStatusLeft();
       updateStatusRight();
-      document.getElementById('channelMeta').textContent = `FEED IDENT ${numberToWord(channelNum)}`;
+      document.getElementById('channelMeta').textContent = metaText(channelNum);
 
       // ═══════════════════════════════════════════════════════════════
       // CHANNEL FINGERPRINT
@@ -1508,7 +1520,7 @@
               document.getElementById('fillLabel').textContent = `ID ${newId} › FILL`;
               document.getElementById('keyLabel').textContent = `ID ${newId} › KEY`;
               updateStatusLeft();
-              document.getElementById('channelMeta').textContent = `FEED IDENT ${numberToWord(newCh)}`;
+              document.getElementById('channelMeta').textContent = metaText(newCh);
             }
           }
 
