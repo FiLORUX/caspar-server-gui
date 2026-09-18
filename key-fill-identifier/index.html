@@ -404,6 +404,43 @@
       text-shadow: none;
     }
 
+    /* ── HERO SEPARATION (straight/alpha rig only) ────────────────────
+       The numerals and the ident line are turned into a matched pair,
+       each invisible on one signal and obvious on the other. The two
+       need OPPOSITE techniques, because stacking alpha is a problem in
+       one direction and the solution in the other.
+
+       NUMERALS -> FILL ONLY, by an opaque plate.
+         A fully opaque layer occludes whatever sits beneath it, so alpha
+         is pinned at exactly 1 across the whole block no matter what the
+         panel gradient behind is doing. Only the colour then varies
+         inside it: plate 38, glyphs 255. Identical key, 217 levels of
+         fill contrast. The glow has to go - text-shadow spills alpha
+         past the plate edge and would print a halo on the key.
+
+       IDENT LINE -> KEY ONLY, by matching the colour already there.
+         Here stacking is exploited rather than fought. Compositing a
+         colour C at alpha a over a backdrop whose premultiplied fill is
+         F gives C*a + F*(1-a), which equals F for ANY a precisely when
+         C = F. So painting the text in the panel's own fill value leaves
+         the fill untouched while the alpha necessarily rises, lifting
+         the key. No plate, no replacement, no geometry change.
+
+       Together they are a two-second sanity check: if the numerals ever
+       appear on the key monitor, or the ident line on the fill monitor,
+       the same signal is feeding both inputs.
+       ───────────────────────────────────────────────────────────────── */
+    .stage.straight .channel-id {
+      background: rgb(38, 38, 38);
+      color: rgb(255, 255, 255);
+      text-shadow: none;
+      padding: 0 3vmin;
+      border-radius: 1vmin;
+    }
+    .stage.straight .channel-meta {
+      color: rgba(13, 13, 13, 0.85);
+    }
+
     .channel-meta {
       font-family: var(--font-mono);
       font-size: clamp(11px, 1.8vmin, 18px);
