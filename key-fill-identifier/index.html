@@ -437,8 +437,28 @@
       padding: 0 3vmin;
       border-radius: 1vmin;
     }
+    /* The ident line uses the level ladder's own recipe, now that the chain
+       has been measured premultiplied end to end: a bed at C=140 a=0.70 and
+       glyphs at C=98 a=1.00 both carry fill 98, so the line is invisible on
+       fill, while the alpha difference (0.70 against 1.00) prints it plainly
+       on the key.
+
+       Matching the PREMULTIPLIED fill rather than the colour is what makes
+       this survive anti-aliasing: every partial-coverage edge pixel is a
+       blend of two surfaces that already share a fill value, so the blend
+       has that same fill too. Edges soften on the key and stay invisible on
+       the fill. Matching colour instead of fill - an earlier attempt here -
+       leaves glyph pixels several levels proud of the backdrop.
+
+       The bed must be semi-transparent for the alpha difference to exist at
+       all, so the panel behind still contributes 30% of its own fill. That
+       is under a level where the panel is dark, rising to roughly 13 where
+       the id-rings cross the line. */
     .stage.straight .channel-meta {
-      color: rgba(13, 13, 13, 0.85);
+      background: rgba(140, 140, 140, 0.70);
+      color: rgb(98, 98, 98);
+      padding: 0.5vmin 1.4vmin;
+      border-radius: 0.6vmin;
     }
 
     .channel-meta {
