@@ -1050,29 +1050,33 @@
     }
 
     /* ── LEVEL LADDER ─────────────────────────────────────────────────
-       CasparCG hands this channel to the card as STRAIGHT alpha, not
-       premultiplied. That was measured, not assumed: a snapshot of the
-       live channel carries rgb(255,254,254) at alpha 179, and a
-       premultiplied sample can never exceed its own alpha. So here
+       SDI fill and key are PREMULTIPLIED (shaped). That is the broadcast
+       convention and what the switcher expects, so the ladder is solved
+       against
 
-         fill = C        and        key = a
+         fill = C x a        key = a
 
-       are independent, and each patch isolates exactly one of them:
+       giving four patches that each isolate exactly one axis:
 
-         BED        C=140 a=0.70  ->  fill 140   key 179
-         FILL ONLY  C=255 a=0.70  ->  fill 255   key 179   key matches BED
-         KEY ONLY   C=140 a=1.00  ->  fill 140   key 255   fill matches BED
+         BED        C=140 a=0.70  ->  fill  98   key 178
+         FILL ONLY  C=255 a=0.70  ->  fill 178   key 178   key matches BED
+         KEY ONLY   C= 98 a=1.00  ->  fill  98   key 255   fill matches BED
          BOTH       C=255 a=1.00  ->  fill 255   key 255
 
-       FILL ONLY therefore vanishes on the key monitor while standing 115
+       FILL ONLY therefore vanishes on the key source while standing 80
        levels clear on fill, and KEY ONLY vanishes on fill while standing
-       76 levels clear on key.
+       77 levels clear on key.
 
-       Had the chain been premultiplied the key-only patch would instead
-       need C = bed_fill / a. Getting that wrong is not cosmetic: the
-       first cut of this ladder used the premultiplied figure of 98 and
-       the patch sat 41 levels off the bed on fill, which is exactly the
-       separation it exists to avoid.
+       DO NOT "correct" these figures from a PNG snapshot of the channel.
+       PNG stores straight alpha by specification, so the image consumer
+       un-premultiplies on the way out and every sample it writes will
+       look straight regardless of what leaves on SDI. Reading C=255 next
+       to a=179 in such a file evidences the file format, nothing more.
+       An earlier revision of this ladder was rebuilt on exactly that
+       misreading, which pushed KEY ONLY to C=140 and left it sitting 42
+       levels off the bed on the fill source - visible on a multiviewer as
+       the very separation the patch exists to avoid. The authority for
+       these numbers is a scope or a multiviewer on the real outputs.
 
        The patches are SIBLINGS on a transparent parent and are never
        stacked. Stacking is what breaks the trick: two layers of alpha
@@ -1100,18 +1104,18 @@
     .level-patch { flex: 1; }
     .level-patch.bed       { background: rgba(140, 140, 140, 0.70); }
     .level-patch.fill-only { background: rgba(255, 255, 255, 0.70); }
-    .level-patch.key-only  { background: rgba(140, 140, 140, 1); }
+    .level-patch.key-only  { background: rgba(98, 98, 98, 1); }
     .level-patch.both      { background: rgba(255, 255, 255, 1); }
 
     /* The two-signal renders are separate pictures rather than an alpha
        pair, so there the same four patches are shown as the values each
        signal would actually carry. */
-    .stage.fill .level-patch.bed       { background: rgb(140, 140, 140); }
-    .stage.fill .level-patch.fill-only { background: rgb(255, 255, 255); }
-    .stage.fill .level-patch.key-only  { background: rgb(140, 140, 140); }
+    .stage.fill .level-patch.bed       { background: rgb(98, 98, 98); }
+    .stage.fill .level-patch.fill-only { background: rgb(178, 178, 178); }
+    .stage.fill .level-patch.key-only  { background: rgb(98, 98, 98); }
     .stage.fill .level-patch.both      { background: rgb(255, 255, 255); }
-    .stage.key .level-patch.bed        { background: rgb(179, 179, 179); }
-    .stage.key .level-patch.fill-only  { background: rgb(179, 179, 179); }
+    .stage.key .level-patch.bed        { background: rgb(178, 178, 178); }
+    .stage.key .level-patch.fill-only  { background: rgb(178, 178, 178); }
     .stage.key .level-patch.key-only   { background: rgb(255, 255, 255); }
     .stage.key .level-patch.both       { background: rgb(255, 255, 255); }
 
@@ -1436,7 +1440,7 @@
         </div>
 
         <div class="sep-cell levels">
-          <span class="sep-label">LEVEL LADDER · fill = C · key = a</span>
+          <span class="sep-label">LEVEL LADDER · fill = C × a</span>
           <div class="sep-body">
             <div class="level-row">
               <div class="level-patch bed"></div>
@@ -1445,9 +1449,9 @@
               <div class="level-patch both"></div>
             </div>
             <div class="level-scale">
-              <span>BED 140/179</span>
-              <span>FILL 255/179</span>
-              <span>KEY 140/255</span>
+              <span>BED 98/178</span>
+              <span>FILL 178/178</span>
+              <span>KEY 98/255</span>
               <span>BOTH 255/255</span>
             </div>
           </div>
