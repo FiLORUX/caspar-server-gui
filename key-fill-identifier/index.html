@@ -150,7 +150,7 @@
       position: absolute;
       inset: var(--safe-margin);
       display: grid;
-      grid-template-rows: auto 1fr auto;
+      grid-template-rows: auto 1fr auto auto;
       grid-template-columns: 1fr 1fr;
       gap: 2vmin;
       --grid-gap: 2vmin;
@@ -1008,6 +1008,231 @@
     }
     .timecode-box.right { right: 6%; }
     .timecode-box.left { left: 6%; }
+    /* ═══════════════════════════════════════════════════════════════
+       SEPARATION STRIP - fill/key divergence instruments
+
+       Everything above this strip identifies the channel. The strip
+       answers a different question: are fill and key still the same
+       picture? Three instruments, each failing in its own visual way,
+       so the failure mode is legible at a glance rather than inferred.
+
+         VERNIER   two counter-travelling rulers of slightly different
+                   pitch. Their coincidence node is the only place the
+                   ticks line up, and it sits on the null index only
+                   while both paths carry the same frame.
+         NULL RAMP complementary ramps crossing at 50%. The crossing
+                   lands dead centre only when the transfer is linear
+                   and the premultiply convention matches at both ends.
+         COINCIDE  two chevrons whose intersection is the ONLY shape
+                   that survives compositing, so the diamond's symmetry
+                   reports registration directly.
+
+       Visibility convention, used throughout the strip:
+         .sep-fill-only  belongs to the fill signal
+         .sep-key-only   belongs to the key matte
+         .sep-both       must appear in both, so it survives the composite
+
+       In a two-output rig (mode=fill and mode=key as separate signals)
+       all three are free. In an alpha-keyed rig the physics bite:
+       premultiplied fill is colour x alpha, so where alpha is zero the
+       fill is necessarily black and "fill only" cannot exist. Rather
+       than hide that, straight mode renders .sep-key-only as opaque
+       black - alpha 1 with no fill - which is exactly what a key-only
+       element IS in an alpha pipeline.
+       ═══════════════════════════════════════════════════════════════ */
+
+    .separation {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 1.6fr 1fr 1fr;
+      gap: var(--grid-gap);
+      height: clamp(58px, 10vmin, 104px);
+    }
+
+    .sep-cell {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--panel-border);
+      border-radius: 1.5vmin;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.25));
+      padding: 0.9vmin 1.3vmin 1vmin;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5vmin;
+    }
+    .stage.key .sep-cell {
+      background: #000;
+      border-color: rgba(255, 255, 255, 0.4);
+    }
+
+    .sep-label {
+      font-family: var(--font-mono);
+      font-size: clamp(7px, 1.05vmin, 11px);
+      letter-spacing: 0.22em;
+      color: rgba(255, 255, 255, 0.45);
+      white-space: nowrap;
+    }
+    .stage.key .sep-label { color: var(--key-white); }
+
+    .sep-body { position: relative; flex: 1; }
+
+    /* ── Visibility convention ───────────────────────────────────── */
+    .sep-fill-only, .sep-key-only { display: none; }
+    .stage.fill .sep-fill-only,
+    .stage.preview .sep-fill-only { display: block; }
+    .stage.key .sep-key-only,
+    .stage.preview .sep-key-only,
+    .stage.straight .sep-key-only { display: block; }
+    /* In the alpha render there is only one picture, so an element drawn
+       here at full opacity necessarily reaches both fill and key. Showing
+       it is therefore the truthful thing to do - what straight mode cannot
+       offer is the reverse case, fill without key. */
+    .stage.straight .sep-fill-only { display: block; }
+
+    /* ── VERNIER ─────────────────────────────────────────────────── */
+    .vern-row {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 30%;
+      background-repeat: repeat-x;
+    }
+    /* The two pitches differ by roughly one division across the cell.
+       That difference is what produces a single readable coincidence
+       node instead of a uniform shimmer. */
+    .vern-row.vern-a {
+      top: 4%;
+      background-image: repeating-linear-gradient(90deg,
+        var(--fill-accent) 0 2px, transparent 2px 24px);
+      animation: vern-travel-a 3.2s linear infinite;
+    }
+    .vern-row.vern-b {
+      top: 40%;
+      background-image: repeating-linear-gradient(90deg,
+        var(--key-white) 0 2px, transparent 2px 25.5px);
+      animation: vern-travel-b 3.2s linear infinite;
+    }
+    .stage.key .vern-row.vern-a {
+      background-image: repeating-linear-gradient(90deg,
+        rgba(255, 255, 255, 0.35) 0 2px, transparent 2px 24px);
+    }
+    .stage.straight .vern-row.vern-b {
+      background-image: repeating-linear-gradient(90deg,
+        #000 0 2px, transparent 2px 25.5px);
+    }
+    @keyframes vern-travel-a { to { background-position: -240px 0; } }
+    @keyframes vern-travel-b { to { background-position:  255px 0; } }
+
+    /* Null index: the coincidence node belongs here. */
+    .vern-null {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 26%;
+      width: 1px;
+      background: var(--fill-secondary);
+      transform: translateX(-0.5px);
+    }
+    .stage.key .vern-null { background: var(--key-white); }
+    .vern-null::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      bottom: -0.4vmin;
+      width: 0.8vmin;
+      height: 0.8vmin;
+      transform: translateX(-50%) rotate(45deg);
+      background: inherit;
+    }
+
+    .vern-scale {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: clamp(6px, 0.95vmin, 10px);
+      color: rgba(255, 255, 255, 0.4);
+    }
+    .stage.key .vern-scale { color: var(--key-white); }
+    .vern-scale span.zero { color: var(--fill-secondary); }
+    .stage.key .vern-scale span.zero { color: var(--key-white); }
+
+    /* ── NULL RAMP ───────────────────────────────────────────────── */
+    .ramp {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 38%;
+    }
+    .ramp.ramp-a {
+      top: 2%;
+      background: linear-gradient(90deg,
+        rgba(var(--fill-accent-rgb), 1), rgba(var(--fill-accent-rgb), 0));
+    }
+    .ramp.ramp-b {
+      top: 44%;
+      background: linear-gradient(90deg,
+        rgba(var(--fill-secondary-rgb), 0), rgba(var(--fill-secondary-rgb), 1));
+    }
+    .stage.key .ramp.ramp-a {
+      background: linear-gradient(90deg, #fff, #000);
+    }
+    .stage.key .ramp.ramp-b {
+      background: linear-gradient(90deg, #000, #fff);
+    }
+    /* Where the two ramps read equal is the 50% crossing. A linear,
+       correctly premultiplied chain puts it on this mark. */
+    .ramp-cross {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 18%;
+      width: 1px;
+      background: rgba(255, 255, 255, 0.85);
+      transform: translateX(-0.5px);
+    }
+
+    /* ── COINCIDENCE DIAMOND ─────────────────────────────────────── */
+    .coin {
+      position: absolute;
+      inset: 0;
+    }
+    .coin-chevron {
+      position: absolute;
+      top: 50%;
+      width: 42%;
+      height: 62%;
+      transform: translateY(-50%);
+    }
+    .coin-chevron.coin-a {
+      left: 12%;
+      background: var(--fill-accent);
+      clip-path: polygon(0 0, 100% 50%, 0 100%);
+    }
+    .coin-chevron.coin-b {
+      right: 12%;
+      background: var(--key-white);
+      clip-path: polygon(100% 0, 0 50%, 100% 100%);
+    }
+    .stage.key .coin-chevron.coin-a { background: rgba(255, 255, 255, 0.35); }
+    .stage.straight .coin-chevron.coin-b { background: #000; }
+    /* The overlap is the only region where fill and key are both present,
+       so downstream this diamond is the whole picture. Skew it and the
+       registration error is the skew. */
+    .coin-node {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 1.6vmin;
+      height: 1.6vmin;
+      transform: translate(-50%, -50%) rotate(45deg);
+      border: 1px solid var(--fill-secondary);
+    }
+    .stage.key .coin-node { border-color: var(--key-white); }
+
   </style>
 </head>
 <body>
@@ -1097,6 +1322,43 @@
             <span class="key-motion-label">KEY SYNC</span>
             <div class="timecode timecode-box right" id="timecode">88:88:88:88</div>
             <div class="timecode timecode-box left" id="wallclock">88:88:88:88</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Separation strip: is fill still the same picture as key? -->
+      <div class="separation">
+        <div class="sep-cell">
+          <span class="sep-label">DRIFT VERNIER · COINCIDENCE ON NULL</span>
+          <div class="sep-body">
+            <div class="vern-row vern-a"></div>
+            <div class="vern-row vern-b"></div>
+            <div class="vern-null"></div>
+            <div class="vern-scale">
+              <span>4</span><span>3</span><span>2</span><span>1</span>
+              <span class="zero">0</span>
+              <span>1</span><span>2</span><span>3</span><span>4</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sep-cell">
+          <span class="sep-label">NULL RAMP · CROSSING AT CENTRE</span>
+          <div class="sep-body">
+            <div class="ramp ramp-a"></div>
+            <div class="ramp ramp-b"></div>
+            <div class="ramp-cross"></div>
+          </div>
+        </div>
+
+        <div class="sep-cell">
+          <span class="sep-label">COINCIDENCE · DIAMOND SYMMETRY</span>
+          <div class="sep-body">
+            <div class="coin">
+              <div class="coin-chevron coin-a sep-fill-only"></div>
+              <div class="coin-chevron coin-b sep-key-only"></div>
+              <div class="coin-node"></div>
+            </div>
           </div>
         </div>
       </div>
