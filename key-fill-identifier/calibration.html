@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <link rel="canonical" href="https://tsg.thast.live/keyfill/calibration.html">
+  <title>TSG Key + Fill — Chain Calibration Chart</title>
+  <meta name="description" content="Instrumentation chart for measuring a CasparCG key and fill chain end to end: fill transfer, alpha transfer, premultiply convention and key flatness.">
+
+  <style>
+    /*
+     * CHAIN CALIBRATION CHART
+     *
+     * This is not an ident. It exists to be MEASURED, on the real outputs,
+     * so that the values used by the ident pattern are derived from the
+     * chain rather than assumed about it.
+     *
+     * Everything sits on one 16-column grid of 120px cells across a fixed
+     * 1920x1080 stage. A single grid means a measuring script needs only
+     * the column index, and 120px survives a quarter-scale multiviewer
+     * tile as 30px, which is far more than enough to average over.
+     *
+     * The bands answer four separate questions:
+     *
+     *   BAND 1  fill transfer.   Sixteen greys at alpha 1. Reading these on
+     *           the fill monitor shows whether the chain is full or limited
+     *           range and whether anything bends the transfer.
+     *
+     *   BAND 2  alpha transfer AND the premultiply question. Colour is
+     *           pinned at 255 and only alpha steps. On the key monitor this
+     *           maps alpha to key level. On the FILL monitor it settles the
+     *           convention outright: premultiplied fill follows 255*a and so
+     *           ramps, straight fill ignores alpha and stays flat at 255.
+     *           Column 0 alone decides it - colour 255 at alpha 0 reads 0
+     *           when premultiplied and 255 when straight.
+     *
+     *   BAND 3  key flatness. Both halves are alpha 1, so the key must be
+     *           uniform across the split. Any step in the key where the fill
+     *           changes from white to black means fill is leaking into key.
+     *
+     *   MARKERS four opaque corner squares at known coordinates, so a tile
+     *           can be located and scaled exactly before anything is read.
+     *
+     * Deliberately static: no animation and no timers, so a capture taken at
+     * any moment is identical to any other.
+     */
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      /* Transparent, so the alpha channel is the page's own and not a
+         background the renderer has flattened onto. */
+      background: transparent;
+    }
+
+    #stage {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1920px;
+      height: 1080px;
+      transform-origin: top left;
+      font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+    }
+
+    .marker {
+      position: absolute;
+      width: 80px;
+      height: 80px;
+      background: rgb(255, 255, 255);
+    }
+    .marker.tl { left: 0;    top: 0; }
+    .marker.tr { left: 1840px; top: 0; }
+    .marker.bl { left: 0;    top: 1000px; }
+    .marker.br { left: 1840px; top: 1000px; }
+
+    .band {
+      position: absolute;
+      left: 0;
+      width: 1920px;
+      height: 210px;
+      display: flex;
+    }
+    .band > div { width: 120px; height: 100%; }
+
+    #band1 { top: 120px; }
+    #band2 { top: 390px; }
+    #band3 { top: 660px; }
+
+    .caption {
+      position: absolute;
+      left: 100px;
+      font-size: 22px;
+      letter-spacing: 0.18em;
+      color: rgba(255, 255, 255, 0.85);
+    }
+    #cap1 { top: 88px; }
+    #cap2 { top: 358px; }
+    #cap3 { top: 628px; }
+    #cap4 { top: 892px; }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <div class="marker tl"></div>
+    <div class="marker tr"></div>
+    <div class="marker bl"></div>
+    <div class="marker br"></div>
+
+    <div class="caption" id="cap1">BAND 1 · FILL STAIRCASE · alpha = 1 · grey 0 to 255 in 16 steps</div>
+    <div class="band" id="band1"></div>
+
+    <div class="caption" id="cap2">BAND 2 · ALPHA STAIRCASE · colour = 255 · alpha 0 to 1 in 16 steps</div>
+    <div class="band" id="band2"></div>
+
+    <div class="caption" id="cap3">BAND 3 · KEY FLATNESS · both halves alpha = 1 · fill white | black</div>
+    <div class="band" id="band3"></div>
+
+    <div class="caption" id="cap4">COLUMN WIDTH 120px · GRID 16 · MARKERS 80px AT 0,0 / 1840,0 / 0,1000 / 1840,1000</div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var STEPS = 16;
+
+      function build() {
+        var b1 = document.getElementById('band1');
+        var b2 = document.getElementById('band2');
+        var b3 = document.getElementById('band3');
+
+        for (var i = 0; i < STEPS; i++) {
+          // Band 1: grey value stepped, alpha pinned at 1.
+          var v = Math.round(i * 255 / (STEPS - 1));
+          var d1 = document.createElement('div');
+          d1.style.background = 'rgba(' + v + ',' + v + ',' + v + ',1)';
+          d1.dataset.value = v;
+          b1.appendChild(d1);
+
+          // Band 2: alpha stepped, colour pinned at 255.
+          var a = i / (STEPS - 1);
+          var d2 = document.createElement('div');
+          d2.style.background = 'rgba(255,255,255,' + a.toFixed(4) + ')';
+          d2.dataset.alpha = a.toFixed(4);
+          b2.appendChild(d2);
+
+          // Band 3: left half white, right half black, both fully opaque.
+          var d3 = document.createElement('div');
+          d3.style.background = (i < STEPS / 2) ? 'rgb(255,255,255)' : 'rgb(0,0,0)';
+          b3.appendChild(d3);
+        }
+      }
+
+      function fit() {
+        // Exactly 1:1 under CasparCG at 1080p; scaled only so the chart is
+        // still inspectable in a normal browser window.
+        var s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+        document.getElementById('stage').style.transform = 'scale(' + s + ')';
+      }
+
+      build();
+      fit();
+      window.addEventListener('resize', fit);
+    }());
+  </script>
+</body>
+</html>
