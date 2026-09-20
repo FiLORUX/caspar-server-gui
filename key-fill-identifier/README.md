@@ -24,8 +24,28 @@ This HTML-based test graphic enables rapid identification and pairing verificati
 
 | Parameter | Values | Default | Description |
 |-----------|--------|---------|-------------|
-| `mode` | `preview`, `fill`, `key` | `preview` | Output mode |
+| `mode` | `preview`, `fill`, `key`, `straight` | `preview` | Output mode |
 | `id` | `1`–`16` | `1` | Channel/feed identifier |
+| `ident` | free text, capped at 48 characters | — | Replaces the meta line under the numerals |
+| `audio` | `on`, `off` | on except in `key` | Ident tones |
+
+### Choosing a mode for the rig you have
+
+`fill` and `key` are two **separate pictures**, for a rig with two outputs: send
+one to the fill input and the other to the key input.
+
+`straight` is the single alpha-bearing render, for a card doing the keying
+itself — a DeckLink consumer with `<keyer>external</keyer>`, where the hardware
+splits one composition into the fill and key pair. Use this one when CasparCG
+drives a single device. Note that `mode=fill` deliberately paints an opaque black
+background and therefore carries no usable alpha; pointing an alpha-keyed rig at
+it produces a solid white key.
+
+The separation behaviour of the pattern (what appears on fill, on key, or only on
+the composite) and the measured levels behind it are documented in
+[`docs/KEY-FILL-SEPARATION.md`](../docs/KEY-FILL-SEPARATION.md).
+`calibration.html` in this directory is the instrumentation chart used to measure
+a chain end to end.
 
 ### Examples
 
