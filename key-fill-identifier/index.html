@@ -461,6 +461,46 @@
       border-radius: 0.6vmin;
     }
 
+    /* ── HEADER BOXES (straight/alpha rig only) ───────────────────────
+       The full-frame decorative wash has to go first. A key-only element
+       needs a KNOWN backdrop: its bed is semi-transparent by necessity,
+       so whatever lies behind leaks through at (1 - a) and moves the fill
+       with it. The sweep is bright and animated, so the leak would vary
+       per frame and the null would never hold. Key mode already hides
+       these two; the alpha rig needs the same treatment for the same
+       reason, and every instrument on the page then sits on a backdrop
+       of known zero.
+
+       LEFT BOX -> FILL ONLY. Opaque background plus opaque text pins
+       alpha at 1 across the whole box, so only the colour varies and the
+       key stays flat. The glow may stay: the box clips it and an opaque
+       layer cannot leak alpha.
+
+       RIGHT BOX -> KEY ONLY. Bed at C=140 a=0.70 and glyphs at C=98
+       a=1.00 share premultiplied fill 98, so the text cannot be seen on
+       the fill signal, while 0.70 against 1.00 prints it on the key.
+       Both borders go: a 15% white border would ring each box with an
+       alpha edge that belongs to neither signal.
+       ───────────────────────────────────────────────────────────────── */
+    .stage.straight .fill-texture,
+    .stage.straight .fill-sweep { display: none; }
+
+    .stage.straight .header-left {
+      background: rgb(20, 20, 20);
+      border: none;
+    }
+    .stage.straight .fill-label {
+      color: var(--fill-accent);
+    }
+
+    .stage.straight .header-right {
+      background: rgba(140, 140, 140, 0.70);
+      border: none;
+    }
+    .stage.straight .key-label {
+      color: rgb(98, 98, 98);
+    }
+
     .channel-meta {
       font-family: var(--font-mono);
       font-size: clamp(11px, 1.8vmin, 18px);
