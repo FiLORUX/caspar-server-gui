@@ -177,3 +177,33 @@ Micro enumerated first (CasparCG `device=1`) and the ATEM second
 (`device=2`) in this test. Re-run `dlprobe` (or the GUI's own DeckLink panel)
 to confirm numbering rather than assuming it before adding or removing
 Blackmagic hardware.
+
+## 7. GPU adapter selection for the OpenGL mixer
+
+This NUC is an Intel "Hades Canyon" hybrid-graphics board: an Intel HD
+Graphics 630 integrated GPU alongside a discrete AMD Radeon RX Vega M GH, both
+real, present, and healthy PCI devices (`PCI\VEN_8086&DEV_591B` and
+`PCI\VEN_1002&DEV_694C` respectively — verify with `Get-PnpDevice -Class
+Display`, not just `Win32_VideoController`, if a "does it even have an Intel
+GPU" question comes up again).
+
+CasparCG's OpenGL device (`Initializing OpenGL Device (sfml)` in the log) is
+created via classic `wgl`, not DXGI. Windows' per-application **"Graphics
+preference"** setting (`HKCU\Software\Microsoft\DirectX\UserGpuPreferences`,
+surfaced in Settings → System → Display → Graphics) only steers **DXGI**
+adapter enumeration (Direct3D/UWP apps) — it does **not** affect which
+adapter a classic `wgl`-based OpenGL context binds to. Setting it to "Power
+saving" for `casparcg.exe` on this box was confirmed to have **no effect**:
+the log still reports `Initialized OpenGL 4.5.0 Core Profile Context ...
+ATI Technologies Inc.` — the mixer still lands on the AMD Vega chip, with its
+documented tendency to render GPU-mixed channels black on some drivers.
+
+The correct lever on an AMD hybrid-graphics system is **AMD's own Radeon
+Software (Adrenalin / "CNext")**, which is installed and running on this box
+(`RadeonSoftware.exe`) and exposes a genuine per-application Graphics profile
+(Power Saving ↔ High Performance) that does influence legacy OpenGL adapter
+binding. This was identified but not yet applied/verified end-to-end in this
+session — do that (Radeon Software → Gaming → add `casparcg.exe` → Power
+Saving → confirm the log now shows `Intel(R) HD Graphics 630` as the OpenGL
+vendor, then check real channel output, not just the log line) before relying
+on it for a show.
