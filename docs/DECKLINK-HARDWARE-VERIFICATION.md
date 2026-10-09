@@ -124,3 +124,56 @@ so it stays green in CI on machines with no card.
 
 These could not be exercised on the available single-port, no-keyer card and are
 deliberately left documented rather than implemented blind.
+
+## 6. A second DeckLink device: ATEM Mini Extreme ISO G2 over Thunderbolt
+
+Verified 2026-09-28 on the same rig, with a Blackmagic ATEM Mini Extreme ISO G2
+attached over Thunderbolt. Its link enumerates entirely under `PCI\VEN_BDBD`
+(Blackmagic's PCI vendor ID), parented off an Intel PCI-to-PCI Bridge
+(Thunderbolt tunnel), with its AVStream/audio children under the
+`DECKLINK\AVSTREAM` / `DECKLINK\AUDIO` namespace — the same Desktop Video driver
+stack as the DeckLink SDI Micro, and **zero USB enumeration** anywhere in the
+chain. Do not assume a Thunderbolt-attached ATEM is "just a USB capture device"
+from its connector shape alone; check the PnP bus topology.
+
+Re-running the `dlprobe` enumeration tool with the ATEM attached now reports:
+
+```
+COUNT_RESULT=0 DEVICE_COUNT=2
+=== DEVICE 0 === DeckLink SDI Micro       — internal_key=0 external_key=0
+=== DEVICE 1 === ATEM Mini Extreme ISO G2 — internal_key=0 external_key=1
+```
+
+Unlike the SDI Micro, the ATEM's Thunderbolt link reports **`external_key=1`** —
+genuine external-keyer hardware support. This was confirmed live, not just via
+enumeration: starting CasparCG 2.5.0 with
+
+```xml
+<decklink>
+  <device>2</device>
+  <keyer>external</keyer>
+</decklink>
+```
+
+produces, with no error:
+
+```
+ATEM Mini Extreme ISO G2 [2-2|1080p5000] Enabled external keyer.
+ATEM Mini Extreme ISO G2 [2-2|1080p5000] Initialized.
+```
+
+Contrast this with the SDI Micro, which always logs `Failed to enable external
+keyer` for the same `keyer` setting (expected and benign — see the keyer
+behaviour notes referenced in `ServerPanel.tsx`). A real key+fill channel is
+therefore achievable on this rig with **zero extra hardware**: no
+`external_separate_device` pairing, no second physical card, just the ATEM's
+own Thunderbolt device index with `keyer=external`. CasparCG treats an
+omitted keyer the same as `default`, which also resolves to an "external"
+attempt internally — so `keyer=default` on this device produces the identical
+result as `keyer=external`.
+
+Device numbering follows SDK enumeration order, not any fixed ID: the SDI
+Micro enumerated first (CasparCG `device=1`) and the ATEM second
+(`device=2`) in this test. Re-run `dlprobe` (or the GUI's own DeckLink panel)
+to confirm numbering rather than assuming it before adding or removing
+Blackmagic hardware.
