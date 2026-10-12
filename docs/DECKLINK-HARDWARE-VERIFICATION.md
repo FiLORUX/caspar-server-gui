@@ -207,3 +207,75 @@ session — do that (Radeon Software → Gaming → add `casparcg.exe` → Power
 Saving → confirm the log now shows `Intel(R) HD Graphics 630` as the OpenGL
 vendor, then check real channel output, not just the log line) before relying
 on it for a show.
+
+## 8. DeckLink Quad 2 — native hardware key/fill consumes a non-adjacent device index
+
+Verified 2026-10-12/13 on a production playout rig (`samson`), a single
+Blackmagic **DeckLink Quad 2** card (one physical card, **not** two — see the
+corrected-mistake note below): 8 independently-configurable bi-directional
+3G-SDI connectors, SDK-enumerated as devices 1–8. Official spec, for when this
+needs re-verifying rather than re-guessing:
+
+- [Markertek: DeckLink Quad 2, 8 Channel Capture and Playback Card](https://www.markertek.com/product/bmd-bdlkdvqd2/blackmagic-design-bdlkdvqd2-decklink-quad-3g-sdi-8-channel-capture-and-playback-card)
+- [DeckLink Quad 2 official techspecs PDF](https://www.syntex.cz/media/document/3606/decklink-quad-2-techspecs.pdf)
+
+**The card ships with connectors 1+2 pre-configured in Blackmagic Desktop
+Video Setup as a dedicated "key/fill" profile pair** — genuine hardware
+premultiplied key+fill with no drift (the headline feature of the Quad 2/Duo 2
+generation over the old Quad 1, which needed external genlock referencing to
+avoid key/fill drift). The remaining connectors (3–8) are a "single i/o"
+profile: freely, individually selectable as input or output by whichever
+application opens them — **direction is decided entirely in software by the
+consumer that opens the device, there is no separate per-port direction
+toggle to set in Desktop Video Setup for those**.
+
+The trap: opening SDK device **1** as a plain `<decklink><device>1</device>`
+CasparCG consumer (no `key_device`, `keyer=default`) is sufficient on its own
+to drive the full hardware key+fill pair — the card automatically also claims
+its physical companion connector to carry the key signal. That companion
+connector is **not** SDK device 2 (the next sequential index); on this card it
+enumerates as **SDK device 5**. Device numbering follows SDK enumeration
+order, not physical connector order or any fixed ID — confirmed again here,
+same as §6 above.
+
+Consequence: assigning SDK device 5 to any *other* CasparCG channel — even
+with nothing else running, after killing every known competing process
+(`tsg-lineup-tauri.exe`, `BMDStreamingServer.exe`), after a full Windows
+reboot — fails every single time with:
+
+```
+Exception: .../decklink_consumer.cpp(820): Throw in function enable_video
+DeckLink Quad 2 [4-5|1080p5000] Could not enable primary video output.
+```
+
+This is **not** the documented process-contention failure mode (that one is
+real too — see §"competing processes" below — but produces the *identical*
+error string, so don't assume you've found the same bug twice just because
+the message matches). Here the device is correctly, permanently unavailable
+because it is already hardware-claimed as device 1's key companion the moment
+device 1's consumer opens. No amount of killing other processes, no reboot,
+fixes it — because nothing is wrongly holding it. The fix is channel
+reassignment, not more troubleshooting: give device 1 (and only device 1) to
+the channel that actually wants hardware key+fill, and never assign its
+hidden companion index to anything else.
+
+**Two already-documented, genuinely different causes share this exact log
+line** — grep the day's log for "Could not enable" and check which applies
+before assuming either:
+
+- `tsg-lineup-tauri.exe` / `BMDStreamingServer.exe` (Desktop Video Run key) /
+  `vMixService` holding the card from a previous session — kill the competing
+  process, not the card. See `ti2026-playout-rig` session notes.
+- A card's native key/fill pairing claiming a non-adjacent companion index
+  (this section) — reassign channels, don't keep restarting.
+
+**Corrected mistake, left in deliberately:** earlier in the same session this
+was misdiagnosed as "two physical Quad 2 cards" because Windows PnP shows two
+top-level `PCI\VEN_BDBD&DEV_A13F` device nodes (`Get-PnpDevice -Class
+Unknown,Other,Media | Where InstanceId -match VEN_BDBD`). Two top-level PCI
+device nodes with the same device ID does **not** mean two physical cards —
+multi-port professional capture cards routinely expose multiple PCI
+functions from one physical board for bandwidth reasons. The official spec
+(8 connectors, one card) is the authority here; PCI topology alone is not
+enough to infer physical card count, the same lesson as §6/§7 above applied
+to a new way of getting it wrong.
