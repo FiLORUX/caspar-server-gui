@@ -229,6 +229,11 @@ application opens them — **direction is decided entirely in software by the
 consumer that opens the device, there is no separate per-port direction
 toggle to set in Desktop Video Setup for those**.
 
+To avoid mixing the two numbering schemes: physical connectors 1+2 are the
+key/fill pair, and on this card those are **SDK devices 1 and 5** (physical
+connector 2 is SDK device 5). SDK device numbers are enumeration order, not
+connector order, so never translate between them by eye.
+
 The trap: opening SDK device **1** as a plain `<decklink><device>1</device>`
 CasparCG consumer (no `key_device`, `keyer=default`) is sufficient on its own
 to drive the full hardware key+fill pair — the card automatically also claims
@@ -279,3 +284,80 @@ functions from one physical board for bandwidth reasons. The official spec
 (8 connectors, one card) is the authority here; PCI topology alone is not
 enough to infer physical card count, the same lesson as §6/§7 above applied
 to a new way of getting it wrong.
+
+## 9. Quad 2 key output — what was observed, and what was not measured
+
+Observed on `samson` (2026-10-14), channel 1 on SDK device 1 with
+`<keyer>default</keyer>`:
+
+- `INFO` reports `keyer=external`, `key-only=false` for channel 1, and the log
+  shows `Enabled external keyer` for device 1 only. Every other channel logs
+  `Failed to enable external keyer`, which is expected on devices without a
+  keyer (see the keyer-behaviour note: `default` resolves to `external` in
+  2.5.0, so there is no config value that skips the call).
+- The `key-fill-identifier` pattern (`mode=straight`) rendered without errors
+  on layer 30 of channel 1.
+- The operator first saw no signal at all on the connector they took to be the
+  key output, then later reported key appearing on the connector that
+  previously showed fill. Which connector carries which signal, and whether
+  the pair is reversed from the assumption, was **not resolved or measured**.
+  Desktop Video Setup also showed device 1 as an input at one point; Caspar
+  opens no inputs, so this is presumably the bidirectional connector display,
+  but it was not confirmed.
+
+Treat the polarity of the pair as unverified until it is read on a scope or a
+multiviewer tile. Do not infer it from the SDK index.
+
+## 10. Playing from the file server through a symlink
+
+Goal: occasionally play material straight from the file server without copying
+it, by exposing a server folder inside the CasparCG media path.
+
+Findings (verified 2026-10-14):
+
+- Directory **junctions** cannot target a UNC path. A directory **symbolic
+  link** can, provided `fsutil behavior query SymlinkEvaluation` reports
+  "Local to remote symbolic links are enabled" (the default).
+- PowerShell's `New-Item -ItemType SymbolicLink` opens the target first and
+  fails with "Access is denied" from an SSH session. Create the link with
+  `CreateSymbolicLinkW` (flag `1`, directory) or `cmd /c mklink /D`, neither of
+  which validates the target. Beware non-ASCII characters in the target path
+  when passing it through a console code page; build such strings from
+  `[char]` code points.
+- SMB credentials are per logon session. `cmdkey /add` is refused over SSH
+  ("Credentials cannot be saved from this logon session"); run it in the
+  interactive desktop session of the account that runs `casparcg.exe`. The
+  entry then lives in Credential Manager and is picked up by Caspar. An
+  SSH session still gets "Access is denied" afterwards, which is expected.
+- To test access as the interactive user from SSH, run a one-shot scheduled
+  task with `/IT` as that user, write the result to a file, read it, and delete
+  the task.
+- The media scanner follows the link. A 45-file, roughly 1 TB folder appeared
+  in `CLS` within about 25 seconds, and `CLS` latency stayed at 320-330 ms
+  before, during and after indexing. Playback of the large files over the
+  link was **not** tested.
+- Remove a link with `rmdir <link>` only. Never use `rd /s` or
+  `Remove-Item -Recurse` on it, which would follow the link.
+- Copying a Mac-authored folder brings `._*` AppleDouble files with it
+  (hidden, so `Get-ChildItem` without `-Force` undercounts). Strip them before
+  they reach a playout media folder.
+- A folder the scanner has open cannot be renamed ("Access is denied"), even
+  though CasparCG already lists its contents. Rename media folders before they
+  are first indexed, or while the scanner is idle.
+
+## 11. Operational notes from the same live session
+
+- **Two CasparCG instances.** The 09:03 start followed a crash in the HTML
+  module (`html.cpp(326): [cef_executor] Could not post task`, then
+  `terminate`). `casparcg.exe` child processes (CEF helpers) share the image
+  name; identify an instance by the process whose parent is not another
+  `casparcg.exe`. A second instance can come from a manual double-click racing
+  the launcher's supervisor; the cause on the day was not proven.
+- **Conductor does not run on the playout machine.** It runs on the control
+  PC (ports 7777 operator surface, 7778 multiviewer). Nothing listens on 7777
+  on the playout machine; connection refused there is normal.
+- **Per-session SMB mappings.** A drive letter mapped in an interactive
+  session reports "Unavailable" from an SSH session on the same machine.
+- **Disk headroom on the control PC** matters when staging media there; check
+  free space before copying and remove the staging copy once the destination
+  is verified byte-for-byte (file count and total bytes).
