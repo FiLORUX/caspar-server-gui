@@ -361,3 +361,38 @@ Findings (verified 2026-10-14):
 - **Disk headroom on the control PC** matters when staging media there; check
   free space before copying and remove the staging copy once the destination
   is verified byte-for-byte (file count and total bytes).
+
+## 12. Unattended start after a reboot
+
+State configured on 2026-10-15; the cold-boot path itself has **not** been
+exercised yet, so confirm it with a real reboot outside a show.
+
+- **Playout machine.** `production` has no password, so autologon is enabled
+  with an empty `DefaultPassword` (`AutoAdminLogon=1`, `DefaultUserName`,
+  `DefaultDomainName` set under `Winlogon`). `LimitBlankPasswordUse=1` only
+  blocks network logons for blank-password accounts; it does not affect the
+  console logon. Nothing secret is stored.
+- **Scheduled task `CasparCG-Playout`** (trigger: logon of `production`,
+  interactive, limited token, restart on failure 999 times at one-minute
+  intervals, no time limit, `IgnoreNew`). It runs `start-playout.ps1`, which
+  exits 0 immediately if a main `casparcg.exe` is already running (so a
+  manual start can never create a second instance), otherwise starts
+  `scanner.exe`, waits for it to listen on the port named in
+  `casparcg.config`, and then runs `casparcg.exe` in the foreground so a
+  non-zero exit triggers the task restart. It logs to `start-playout.log`.
+  The launcher starts `casparcg.exe` directly and therefore never rewrites
+  `casparcg.config`; this is deliberate, because the GUI's Start button
+  regenerates that file from the active profile and drops a hand-patched
+  `<osc>` block (see the known issue in `TODO.md`).
+- **Console QuickEdit** is disabled for `production`
+  (`HKCU\Console\QuickEdit=0`). With it on, a click in the console window
+  blocks every write to it and can freeze `casparcg.exe`.
+- **Control PC.** The `Conductor` task starts at boot as SYSTEM and now also
+  restarts on failure (999 times, one-minute interval, no time limit); it
+  previously had no restart policy, so a crash mid-show left it down. The
+  machine already had autologon.
+- **Woltaire** is a logon task of `production` with five restarts, so on the
+  playout machine it only returns after the autologon above.
+- Verify after a reboot: `start-playout.log` shows the scanner and Caspar
+  starts, AMCP answers on 5250, all channels report PLAYING, and Woltaire and
+  Conductor respond.
